@@ -11,16 +11,15 @@ import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.chunk.Chunk;
-import net.minecraft.world.chunk.WorldChunk;
-import net.minecraft.text.Text;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.phys.Vec3;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -94,7 +93,7 @@ public class OneByOneHoles extends Module {
 
     @Override
     public void onActivate() {
-        if (mc.world == null) return;
+        if (mc.level == null) return;
         
         if (useThreading.get()) {
             threadPool = Executors.newFixedThreadPool(threadPoolSize.get());
@@ -103,14 +102,14 @@ public class OneByOneHoles extends Module {
         oneByOneHoles.clear();
         
         if (useThreading.get() && threadPool != null) {
-            for (Chunk chunk : Utils.chunks()) {
-                if (chunk instanceof WorldChunk worldChunk) {
+            for (ChunkAccess chunk : Utils.chunks()) {
+                if (chunk instanceof LevelChunk worldChunk) {
                     threadPool.submit(() -> scanChunk(worldChunk));
                 }
             }
         } else {
-            for (Chunk chunk : Utils.chunks()) {
-                if (chunk instanceof WorldChunk worldChunk) {
+            for (ChunkAccess chunk : Utils.chunks()) {
+                if (chunk instanceof LevelChunk worldChunk) {
                     scanChunk(worldChunk);
                 }
             }
@@ -145,7 +144,7 @@ public class OneByOneHoles extends Module {
                 if (wasAdded && chatNotifications.get() && (!useThreading.get() || !limitChatSpam.get())) {
                     mc.execute(() -> {
                         if (mc.player != null) {
-                            mc.player.sendMessage(Text.of("1x1x1 hole detected at: " + pos.getX() + ", " + pos.getY() + ", " + pos.getZ()), false);
+                            mc.player.sendSystemMessage(Component.nullToEmpty("1x1x1 hole detected at: " + pos.getX() + ", " + pos.getY() + ", " + pos.getZ()));
                         }
                     });
                 }
@@ -154,7 +153,7 @@ public class OneByOneHoles extends Module {
             }
 
             for (Direction direction : Direction.values()) {
-                BlockPos neighborPos = pos.offset(direction);
+                BlockPos neighborPos = pos.relative(direction);
                 if (isOneByOneHole(neighborPos)) {
                     oneByOneHoles.add(neighborPos);
                 } else {
@@ -170,16 +169,16 @@ public class OneByOneHoles extends Module {
         }
     }
 
-    private void scanChunk(WorldChunk chunk) {
+    private void scanChunk(LevelChunk chunk) {
         ChunkPos cpos = chunk.getPos();
-        int xStart = cpos.getStartX();
-        int zStart = cpos.getStartZ();
+        int xStart = cpos.getMinBlockX();
+        int zStart = cpos.getMinBlockZ();
         Set<BlockPos> chunkHoles = new HashSet<>();
         int foundCount = 0;
 
         for (int x = xStart; x < xStart + 16; x++) {
             for (int z = zStart; z < zStart + 16; z++) {
-                for (int y = chunk.getBottomY(); y < chunk.getBottomY() + chunk.getHeight(); y++) {
+                for (int y = chunk.getMinY(); y < chunk.getMinY() + chunk.getHeight(); y++) {
                     BlockPos pos = new BlockPos(x, y, z);
                     if (isOneByOneHole(pos)) {
                         chunkHoles.add(pos);
@@ -190,7 +189,7 @@ public class OneByOneHoles extends Module {
         }
 
         oneByOneHoles.removeIf(pos -> {
-            ChunkPos blockChunk = new ChunkPos(pos);
+            ChunkPos blockChunk = new ChunkPos(pos.getX() >> 4, pos.getZ() >> 4);
             return blockChunk.equals(cpos) && !chunkHoles.contains(pos);
         });
 
@@ -208,7 +207,7 @@ public class OneByOneHoles extends Module {
                     final ChunkPos finalCpos = cpos;
                     mc.execute(() -> {
                         if (mc.player != null) {
-                            mc.player.sendMessage(Text.of("1x1x1 holes: " + finalNewHoles + " new in chunk " + finalCpos.x + "," + finalCpos.z), false);
+                            mc.player.sendSystemMessage(Component.nullToEmpty("1x1x1 holes: " + finalNewHoles + " new in chunk " + finalCpos.x() + "," + finalCpos.z()));
                         }
                     });
                 }
@@ -218,7 +217,7 @@ public class OneByOneHoles extends Module {
                         final BlockPos finalPos = pos;
                         mc.execute(() -> {
                             if (mc.player != null) {
-                                mc.player.sendMessage(Text.of("1x1x1 hole detected at: " + finalPos.getX() + ", " + finalPos.getY() + ", " + finalPos.getZ()), false);
+                                mc.player.sendSystemMessage(Component.nullToEmpty("1x1x1 hole detected at: " + finalPos.getX() + ", " + finalPos.getY() + ", " + finalPos.getZ()));
                             }
                         });
                     }
@@ -228,17 +227,17 @@ public class OneByOneHoles extends Module {
     }
 
     private boolean isOneByOneHole(BlockPos pos) {
-        if (mc.world == null) return false;
-        BlockState selfState = mc.world.getBlockState(pos);
+        if (mc.level == null) return false;
+        BlockState selfState = mc.level.getBlockState(pos);
 
         if (pos.getY() <= 1) return false;
 
         if (selfState.getBlock() != Blocks.AIR) return false;
 
         for (Direction direction : Direction.values()) {
-            BlockPos neighborPos = pos.offset(direction);
-            BlockState neighborState = mc.world.getBlockState(neighborPos);
-            if (!neighborState.isSolidBlock(mc.world, neighborPos)) {
+            BlockPos neighborPos = pos.relative(direction);
+            BlockState neighborState = mc.level.getBlockState(neighborPos);
+            if (!neighborState.isRedstoneConductor(mc.level, neighborPos)) {
                 return false;
             }
         }
@@ -253,10 +252,10 @@ public class OneByOneHoles extends Module {
                         
                         if (x == 0 && y == 0 && z == 0) continue;
 
-                        BlockPos checkPos = pos.add(x, y, z);
-                        BlockState checkState = mc.world.getBlockState(checkPos);
+                        BlockPos checkPos = pos.offset(x, y, z);
+                        BlockState checkState = mc.level.getBlockState(checkPos);
 
-                        if (!checkState.isSolidBlock(mc.world, checkPos)) {
+                        if (!checkState.isRedstoneConductor(mc.level, checkPos)) {
                             return false;
                         }
                     }
@@ -271,7 +270,7 @@ public class OneByOneHoles extends Module {
     private void onRender(Render3DEvent event) {
         if (mc.player == null) return;
 
-        Vec3d playerPos = mc.player.getLerpedPos(event.tickDelta);
+        Vec3 playerPos = mc.player.getPosition(event.tickDelta);
         Color side = new Color(holeColor.get());
         Color outline = new Color(holeColor.get());
         Color tracerColorValue = new Color(tracerColor.get());
@@ -280,18 +279,18 @@ public class OneByOneHoles extends Module {
             event.renderer.box(pos, side, outline, shapeMode.get(), 0);
 
             if (tracers.get()) {
-                Vec3d blockCenter = Vec3d.ofCenter(pos);
+                Vec3 blockCenter = Vec3.atCenterOf(pos);
 
-                Vec3d startPos;
-                if (mc.options.getPerspective().isFirstPerson()) {
-                    Vec3d lookDirection = mc.player.getRotationVector();
-                    startPos = new Vec3d(
+                Vec3 startPos;
+                if (mc.options.getCameraType().isFirstPerson()) {
+                    Vec3 lookDirection = mc.player.getLookAngle();
+                    startPos = new Vec3(
                         playerPos.x + lookDirection.x * 0.5,
                         playerPos.y + mc.player.getEyeHeight(mc.player.getPose()) + lookDirection.y * 0.5,
                         playerPos.z + lookDirection.z * 0.5
                     );
                 } else {
-                    startPos = new Vec3d(
+                    startPos = new Vec3(
                         playerPos.x,
                         playerPos.y + mc.player.getEyeHeight(mc.player.getPose()),
                         playerPos.z

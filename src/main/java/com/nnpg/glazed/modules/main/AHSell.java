@@ -1,18 +1,19 @@
 package com.nnpg.glazed.modules.main;
 
 import com.nnpg.glazed.GlazedAddon;
+import com.nnpg.glazed.utils.GlazedSell;
 import com.nnpg.glazed.VersionUtil;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.screen.GenericContainerScreenHandler;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.slot.SlotActionType;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.ChestMenu;
+import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 
 public class AHSell extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -88,20 +89,35 @@ public class AHSell extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (!awaitingConfirmation || mc.player == null) return;
+        if (!awaitingConfirmation || mc.player == null || mc.gameMode == null) return;
 
         if (delayCounter > 0) {
             delayCounter--;
             return;
         }
 
-        ScreenHandler screenHandler = mc.player.currentScreenHandler;
+        // sometimes the confirm isnt a chest at all, its a server dialog with Yes / No buttons
+        if (GlazedSell.isDialogOpen()) {
+            if (GlazedSell.clickDialogYes()) {
+                if (notifications.get()) info("Sold item in hotbar slot " + currentSlot + ".");
+                awaitingConfirmation = false;
+                moveToNextSlot();
+            }
+            return;
+        }
 
-        if (screenHandler instanceof GenericContainerScreenHandler handler) {
-            if (handler.getRows() == 3) {
-                ItemStack confirmButton = handler.getSlot(15).getStack();
-                if (!confirmButton.isEmpty()) {
-                    mc.interactionManager.clickSlot(handler.syncId, 15, 1, SlotActionType.QUICK_MOVE, mc.player);
+        AbstractContainerMenu screenHandler = mc.player.containerMenu;
+
+        if (screenHandler instanceof ChestMenu handler) {
+            if (handler.getRowCount() == 3) {
+                // slot 15 is the usual spot, but fall back to hunting the accept button since
+                // the layout is not always the same
+                int confirmSlot = handler.getSlot(15).getItem().isEmpty()
+                    ? GlazedSell.findConfirmSlot(handler)
+                    : 15;
+
+                if (confirmSlot >= 0) {
+                    mc.gameMode.handleContainerInput(handler.containerId, confirmSlot, 1, ContainerInput.QUICK_MOVE, mc.player);
                     if (notifications.get()) info("Sold item in hotbar slot " + currentSlot + ".");
                 }
 
@@ -127,11 +143,10 @@ public class AHSell extends Module {
             return;
         }
 
-        // Use VersionUtil to handle version differences
         VersionUtil.setSelectedSlot(mc.player, currentSlot);
-        ItemStack stack = mc.player.getInventory().getStack(currentSlot);
+        ItemStack stack = mc.player.getInventory().getItem(currentSlot);
 
-        if (enableFilter.get() && (stack.isEmpty() || !stack.isOf(filterItem.get()))) {
+        if (enableFilter.get() && (stack.isEmpty() || !stack.is(filterItem.get()))) {
             if (notifications.get()) info("Skipping slot " + currentSlot + " (does not match filter).");
             moveToNextSlot();
             return;
@@ -155,7 +170,7 @@ public class AHSell extends Module {
             info("Sending /ah sell %s for slot %d", formatPrice(parsedPrice), currentSlot);
         }
 
-        mc.getNetworkHandler().sendChatCommand("ah sell " + price);
+        mc.getConnection().sendCommand("ah sell " + price);
         delayCounter = confirmDelay.get();
         awaitingConfirmation = true;
     }
@@ -167,11 +182,11 @@ public class AHSell extends Module {
 
     private boolean hasSellableItemsInHotbar() {
         for (int slot = 0; slot <= 8; slot++) {
-            ItemStack stack = mc.player.getInventory().getStack(slot);
+            ItemStack stack = mc.player.getInventory().getItem(slot);
             if (stack.isEmpty()) continue;
 
             if (enableFilter.get()) {
-                if (stack.isOf(filterItem.get())) return true;
+                if (stack.is(filterItem.get())) return true;
             } else {
                 return true;
             }

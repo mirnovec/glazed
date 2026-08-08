@@ -1,6 +1,11 @@
 package com.nnpg.glazed.modules.main;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.nnpg.glazed.GlazedAddon;
+import com.nnpg.glazed.utils.GlazedScheduler;
+import com.nnpg.glazed.utils.GlazedWebhook;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
@@ -10,44 +15,38 @@ import meteordevelopment.meteorclient.utils.player.PlayerUtils;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.FluidBlock;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.FallingBlock;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.option.GameOptions;
-import net.minecraft.client.util.ScreenshotRecorder;
-import net.minecraft.client.gl.Framebuffer;
-import net.minecraft.text.Text;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.item.BlockItem;
-import net.minecraft.util.Hand;
-import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
-
+import net.minecraft.client.Screenshot;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.FallingBlock;
+import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Comparator;
 import java.io.*;
-import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLConnection;
-import java.net.URI;
 import java.nio.file.Files;
 import java.util.Base64;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
+// 3000 lines. good luck
 public class PremiumTunnelBaseFinder extends Module {
+    private static final Logger LOG = LoggerFactory.getLogger("Glazed");
+
     // just the pickaxe types we support
     public enum PickaxeType {
         NORMAL("Normal Pickaxe", "Mines 2x2 tunnel"),
-        AMETHYST("ᴀᴍᴇᴛʜʏѕᴛ ᴘɪᴄᴋᴀхᴇ", "Mines 3x3 area (only target center block)");
+        AMETHYST("á´€á´á´‡á´›ÊœÊÑ•á´› á´˜Éªá´„á´‹á´€Ñ…á´‡", "Mines 3x3 area (only target center block)");
 
         private final String displayName;
         private final String description;
@@ -709,7 +708,7 @@ public class PremiumTunnelBaseFinder extends Module {
     // player detection state stuff
     private boolean playerDetected = false;
     private String detectedPlayerName = "";
-    private Vec3d detectedPlayerPos = null;
+    private Vec3 detectedPlayerPos = null;
     private int randomLookTicks = 0;
     private int directStareTicks = 0;
     private boolean isRandomLooking = false;
@@ -746,11 +745,11 @@ public class PremiumTunnelBaseFinder extends Module {
 
     @Override
     public void onActivate() {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
 
-        startPos = mc.player.getBlockPos();
+        startPos = mc.player.blockPosition();
         startYLevel = startPos.getY();
-        originalDirection = mc.player.getHorizontalFacing();
+        originalDirection = mc.player.getDirection();
         currentDirection = originalDirection;
         blocksMined = 0;
 
@@ -766,7 +765,7 @@ public class PremiumTunnelBaseFinder extends Module {
         // let go of all keys
         releaseAllKeys();
 
-        String pickaxeInfo = pickaxeType.get() == PickaxeType.AMETHYST ? " (ᴀᴍᴇᴛʜʏѕᴛ mode - 3x3 mining)" : " (Normal mode - 2x2 tunnel)";
+        String pickaxeInfo = pickaxeType.get() == PickaxeType.AMETHYST ? " (á´€á´á´‡á´›ÊœÊÑ•á´› mode - 3x3 mining)" : " (Normal mode - 2x2 tunnel)";
         String yLevelInfo = maintainYLevel.get() ? " | Y-Level: " + startYLevel : "";
         String enhancedFeaturesInfo = " | Enhanced: " +
             (avoidLava.get() ? "Lava" : "") +
@@ -786,7 +785,7 @@ public class PremiumTunnelBaseFinder extends Module {
 
         // take a screenshot if we finished and it's enabled
         if (enableWebhook.get() && screenshotOnComplete.get() && blocksMined > 0) {
-            takeScreenshotAndSend("🏁 Tunneling Complete",
+            takeScreenshotAndSend("ðŸ Tunneling Complete",
                 "Successfully mined " + blocksMined + " blocks" +
                     (infiniteTunnel.get() ? "" : "/" + tunnelLength.get()) +
                     " using " + pickaxeType.get().toString() +
@@ -845,7 +844,7 @@ public class PremiumTunnelBaseFinder extends Module {
 
         // reset stuck detection stuff
         ticksStuck = 0;
-        lastPlayerPos = mc.player.getBlockPos();
+        lastPlayerPos = mc.player.blockPosition();
         lastBlocksMined = 0;
         alreadyReportedStuck = false;
         consecutiveBackupAttempts = 0;
@@ -881,8 +880,8 @@ public class PremiumTunnelBaseFinder extends Module {
         lastPlayerDetectionTime = 0;
 
         // reset smooth looking stuff
-        currentYaw = mc.player != null ? mc.player.getYaw() : 0.0f;
-        currentPitch = mc.player != null ? mc.player.getPitch() : 0.0f;
+        currentYaw = mc.player != null ? mc.player.getYRot() : 0.0f;
+        currentPitch = mc.player != null ? mc.player.getXRot() : 0.0f;
         targetYaw = currentYaw;
         targetPitch = currentPitch;
         isSmoothLooking = false;
@@ -899,7 +898,7 @@ public class PremiumTunnelBaseFinder extends Module {
             return;
         }
 
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
 
         // check if we should stop (only if not infinite mode)
         if (!infiniteTunnel.get() && blocksMined >= tunnelLength.get()) {
@@ -999,13 +998,13 @@ public class PremiumTunnelBaseFinder extends Module {
         if (!avoidLava.get()) return false;
 
         assert mc.player != null;
-        BlockPos playerPos = mc.player.getBlockPos();
+        BlockPos playerPos = mc.player.blockPosition();
         int scanRange = lavaDetectionRange.get();
         int scanWidth = lavaDetectionWidth.get();
         int scanHeight = lavaDetectionHeight.get();
 
         if (debugLavaDetection.get() && notifications.get()) {
-            info("🔍 Scanning for lava: Range=" + scanRange + ", Width=" + scanWidth + ", Height=" + scanHeight);
+            info("ðŸ” Scanning for lava: Range=" + scanRange + ", Width=" + scanWidth + ", Height=" + scanHeight);
         }
 
         // scan in a 3D area ahead of us
@@ -1014,7 +1013,7 @@ public class PremiumTunnelBaseFinder extends Module {
                 for (int vertical = -scanHeight; vertical <= scanHeight; vertical++) {
                     BlockPos scanPos = calculateScanPosition(playerPos, distance, side, vertical);
 
-                    if (isLava(mc.world.getBlockState(scanPos))) {
+                    if (isLava(mc.level.getBlockState(scanPos))) {
                         detectedLavaPos = scanPos;
                         dangerousBlockPos = scanPos;
                         dangerType = "lava (3D scan at " + scanPos.toShortString() + ")";
@@ -1039,13 +1038,13 @@ public class PremiumTunnelBaseFinder extends Module {
     }
 
     private BlockPos calculateScanPosition(BlockPos playerPos, int distance, int side, int vertical) {
-        BlockPos basePos = playerPos.offset(currentDirection, distance);
+        BlockPos basePos = playerPos.relative(currentDirection, distance);
 
         // figure out which way is "side" based on where we're facing
         BlockPos sidePos = switch (currentDirection) {
-            case NORTH, SOUTH -> basePos.add(side, vertical, 0);
-            case EAST, WEST -> basePos.add(0, vertical, side);
-            default -> basePos.add(side, vertical, 0);
+            case NORTH, SOUTH -> basePos.offset(side, vertical, 0);
+            case EAST, WEST -> basePos.offset(0, vertical, side);
+            default -> basePos.offset(side, vertical, 0);
         };
 
         return sidePos;
@@ -1054,15 +1053,15 @@ public class PremiumTunnelBaseFinder extends Module {
     private boolean detectLavaVerticalLegacy() {
         if (!detectLavaVertical.get()) return false;
 
-        BlockPos playerPos = mc.player.getBlockPos();
+        BlockPos playerPos = mc.player.blockPosition();
         int range = verticalLavaRange.get();
 
         // check above us
         for (int y = 1; y <= range; y++) {
             for (int x = -1; x <= 1; x++) {
                 for (int z = -1; z <= 1; z++) {
-                    BlockPos checkPos = playerPos.add(x, y, z);
-                    if (isLava(mc.world.getBlockState(checkPos))) {
+                    BlockPos checkPos = playerPos.offset(x, y, z);
+                    if (isLava(mc.level.getBlockState(checkPos))) {
                         detectedLavaPos = checkPos;
                         dangerousBlockPos = checkPos;
                         dangerType = "lava (above, legacy)";
@@ -1076,8 +1075,8 @@ public class PremiumTunnelBaseFinder extends Module {
         for (int y = 1; y <= range; y++) {
             for (int x = -1; x <= 1; x++) {
                 for (int z = -1; z <= 1; z++) {
-                    BlockPos checkPos = playerPos.add(x, -y, z);
-                    if (isLava(mc.world.getBlockState(checkPos))) {
+                    BlockPos checkPos = playerPos.offset(x, -y, z);
+                    if (isLava(mc.level.getBlockState(checkPos))) {
                         detectedLavaPos = checkPos;
                         dangerousBlockPos = checkPos;
                         dangerType = "lava (below, legacy)";
@@ -1092,7 +1091,7 @@ public class PremiumTunnelBaseFinder extends Module {
 
     // ===== PEARL THROUGH FEATURE =====
     private void checkForEmptyArea() {
-        BlockPos playerPos = mc.player.getBlockPos();
+        BlockPos playerPos = mc.player.blockPosition();
         int radius = emptyAreaScanRadius.get();
         int totalBlocks = 0;
         int airBlocks = 0;
@@ -1101,10 +1100,10 @@ public class PremiumTunnelBaseFinder extends Module {
         for (int x = -radius; x <= radius; x++) {
             for (int y = -radius; y <= radius; y++) {
                 for (int z = -radius; z <= radius; z++) {
-                    BlockPos checkPos = playerPos.add(x, y, z);
+                    BlockPos checkPos = playerPos.offset(x, y, z);
                     totalBlocks++;
 
-                    if (mc.world.getBlockState(checkPos).isAir()) {
+                    if (mc.level.getBlockState(checkPos).isAir()) {
                         airBlocks++;
                     }
                 }
@@ -1116,11 +1115,11 @@ public class PremiumTunnelBaseFinder extends Module {
         emptyAreaDetected = airPercentage >= emptyAreaThreshold.get();
 
         if (emptyAreaDetected && !wasEmptyArea) {
-            if (notifications.get()) info("🕳️ Empty area detected! Air percentage: " + String.format("%.1f%%", airPercentage * 100) +
+            if (notifications.get()) info("🕳ï¸ Empty area detected! Air percentage: " + String.format("%.1f%%", airPercentage * 100) +
                 " (threshold: " + String.format("%.1f%%", emptyAreaThreshold.get() * 100) + ")");
 
             if (enableWebhook.get()) {
-                takeScreenshotAndSend("🕳️ Empty Area Detected - Pearl-Through Available",
+                takeScreenshotAndSend("🕳ï¸ Empty Area Detected - Pearl-Through Available",
                     "**Air Percentage:** " + String.format("%.1f%%", airPercentage * 100) + "\n" +
                         "**Threshold:** " + String.format("%.1f%%", emptyAreaThreshold.get() * 100) + "\n" +
                         "**Position:** " + playerPos.toShortString() + "\n" +
@@ -1135,7 +1134,7 @@ public class PremiumTunnelBaseFinder extends Module {
         if (!enablePearlThrough.get() || !emptyAreaDetected || isPearlThroughActive) return;
 
         // check if middle mouse button is pressed
-        boolean middlePressed = mc.options.pickItemKey.isPressed();
+        boolean middlePressed = mc.options.keyPickItem.isDown();
         long currentTime = System.currentTimeMillis();
 
         if (middlePressed && (currentTime - lastMiddleClickTime) > 500) { // 500ms cooldown
@@ -1156,7 +1155,7 @@ public class PremiumTunnelBaseFinder extends Module {
         if (enableWebhook.get()) {
             takeScreenshotAndSend("🌟 Pearl-Through Activated",
                 "**Cooldown:** " + pearlThroughCooldownTicks + " ticks (" + (pearlThroughCooldownTicks / 20.0) + " seconds)\n" +
-                    "**Position:** " + mc.player.getBlockPos().toShortString() + "\n" +
+                    "**Position:** " + mc.player.blockPosition().toShortString() + "\n" +
                     "**Action:** Pausing mining until cooldown expires");
         }
     }
@@ -1187,7 +1186,7 @@ public class PremiumTunnelBaseFinder extends Module {
     }
 
     private void handleImprovedBackupWithStoneBreaking() {
-        BlockPos currentPos = mc.player.getBlockPos();
+        BlockPos currentPos = mc.player.blockPosition();
         int actualBackupDistance = (int) Math.abs(getDistanceInDirection(backupStartPos, currentPos, currentDirection.getOpposite()));
 
         // check if we're stuck while backing up
@@ -1205,20 +1204,20 @@ public class PremiumTunnelBaseFinder extends Module {
         }
 
         // check if something's blocking us from behind
-        BlockPos behindPos = currentPos.offset(currentDirection.getOpposite());
-        boolean obstacleBehind = !mc.world.getBlockState(behindPos).isAir() ||
-            !mc.world.getBlockState(behindPos.up()).isAir();
+        BlockPos behindPos = currentPos.relative(currentDirection.getOpposite());
+        boolean obstacleBehind = !mc.level.getBlockState(behindPos).isAir() ||
+            !mc.level.getBlockState(behindPos.above()).isAir();
 
         if (obstacleBehind && actualBackupDistance < 2) {
             // try to mine whatever's behind us
-            if (!mc.world.getBlockState(behindPos).isAir()) {
+            if (!mc.level.getBlockState(behindPos).isAir()) {
                 smoothLookAtBlock(behindPos);
                 performMiningAction();
                 backupSteps++;
                 return;
             }
-            if (!mc.world.getBlockState(behindPos.up()).isAir()) {
-                smoothLookAtBlock(behindPos.up());
+            if (!mc.level.getBlockState(behindPos.above()).isAir()) {
+                smoothLookAtBlock(behindPos.above());
                 performMiningAction();
                 backupSteps++;
                 return;
@@ -1246,19 +1245,19 @@ public class PremiumTunnelBaseFinder extends Module {
         isBreakingBlockingStones = true;
 
         // find what's blocking us behind
-        BlockPos currentPos = mc.player.getBlockPos();
-        BlockPos behindPos = currentPos.offset(currentDirection.getOpposite());
+        BlockPos currentPos = mc.player.blockPosition();
+        BlockPos behindPos = currentPos.relative(currentDirection.getOpposite());
 
-        if (!mc.world.getBlockState(behindPos).isAir()) {
+        if (!mc.level.getBlockState(behindPos).isAir()) {
             backupBlockingStone = behindPos;
-        } else if (!mc.world.getBlockState(behindPos.up()).isAir()) {
-            backupBlockingStone = behindPos.up();
+        } else if (!mc.level.getBlockState(behindPos.above()).isAir()) {
+            backupBlockingStone = behindPos.above();
         } else {
             // nothing blocking behind, try the sides
             Direction sideDir = randomizeAvoidanceDirection.get() ?
-                (Math.random() > 0.5 ? currentDirection.rotateYClockwise() : currentDirection.rotateYCounterclockwise()) :
-                currentDirection.rotateYClockwise();
-            backupBlockingStone = currentPos.offset(sideDir);
+                (Math.random() > 0.5 ? currentDirection.getClockWise() : currentDirection.getCounterClockWise()) :
+                currentDirection.getClockWise();
+            backupBlockingStone = currentPos.relative(sideDir);
         }
 
         if (notifications.get()) info("🔨 Breaking blocking stone at " + backupBlockingStone.toShortString());
@@ -1282,7 +1281,7 @@ public class PremiumTunnelBaseFinder extends Module {
         performMiningAction();
 
         // check if we broke it
-        if (mc.world.getBlockState(backupBlockingStone).isAir()) {
+        if (mc.level.getBlockState(backupBlockingStone).isAir()) {
             if (notifications.get()) info("✅ Blocking stone cleared. Resuming backup.");
             isBreakingBlockingStones = false;
             backupBlockingStone = null;
@@ -1304,12 +1303,12 @@ public class PremiumTunnelBaseFinder extends Module {
         // pick which way to go (maybe random)
         if (randomizeAvoidanceDirection.get() && !hasRandomizedAvoidanceDirection) {
             currentDirection = Math.random() > 0.5 ?
-                originalDirection.rotateYClockwise() :
-                originalDirection.rotateYCounterclockwise();
+                originalDirection.getClockWise() :
+                originalDirection.getCounterClockWise();
             hasRandomizedAvoidanceDirection = true;
-            if (notifications.get()) info("🎲 Randomly chose " + (currentDirection == originalDirection.rotateYClockwise() ? "right" : "left") + " direction for avoidance");
+            if (notifications.get()) info("🎲 Randomly chose " + (currentDirection == originalDirection.getClockWise() ? "right" : "left") + " direction for avoidance");
         } else {
-            currentDirection = originalDirection.rotateYClockwise();
+            currentDirection = originalDirection.getClockWise();
         }
 
         lookInDirection(currentDirection);
@@ -1319,7 +1318,7 @@ public class PremiumTunnelBaseFinder extends Module {
         if (!isAvoiding && !isBackingUp && !isRandomLooking && !isDirectStaring && !isLavaAvoidance &&
             !isMovingAway && !isAdjustingYLevel && !isPearlThroughActive) {
             // update to where we're actually facing (when not doing special stuff)
-            currentDirection = mc.player.getHorizontalFacing();
+            currentDirection = mc.player.getDirection();
         }
     }
 
@@ -1327,7 +1326,7 @@ public class PremiumTunnelBaseFinder extends Module {
     private void handleYLevelMaintenance() {
         if (!maintainYLevel.get()) return;
 
-        int currentY = mc.player.getBlockPos().getY();
+        int currentY = mc.player.blockPosition().getY();
         int yDifference = currentY - startYLevel;
 
         if (Math.abs(yDifference) > yLevelTolerance.get()) {
@@ -1339,14 +1338,14 @@ public class PremiumTunnelBaseFinder extends Module {
                 if (yDifference < 0 && autoPlaceBlocks.get()) {
                     // we're too low, need to place blocks
                     needsBlockPlacement = true;
-                    blockPlacementTarget = mc.player.getBlockPos().down();
+                    blockPlacementTarget = mc.player.blockPosition().below();
                 }
             }
         }
     }
 
     private void handleYLevelAdjustment() {
-        int currentY = mc.player.getBlockPos().getY();
+        int currentY = mc.player.blockPosition().getY();
         int yDifference = currentY - startYLevel;
 
         if (needsBlockPlacement && yDifference < 0) {
@@ -1364,8 +1363,8 @@ public class PremiumTunnelBaseFinder extends Module {
             }
         } else if (yDifference > 0) {
             // we're too high, mine down
-            BlockPos targetPos = mc.player.getBlockPos().down();
-            if (!mc.world.getBlockState(targetPos).isAir()) {
+            BlockPos targetPos = mc.player.blockPosition().below();
+            if (!mc.level.getBlockState(targetPos).isAir()) {
                 smoothLookAtBlock(targetPos);
                 performMiningAction();
             } else {
@@ -1408,8 +1407,8 @@ public class PremiumTunnelBaseFinder extends Module {
         int blockSlot = findBlockSlot();
         if (blockSlot == -1) return false;
 
-        int currentSlot = mc.player.getInventory().selectedSlot;
-        mc.player.getInventory().selectedSlot = blockSlot;
+        int currentSlot = mc.player.getInventory().getSelectedSlot();
+        mc.player.getInventory().setSelectedSlot(blockSlot);
 
         try {
             // look at where we want to place it
@@ -1417,17 +1416,17 @@ public class PremiumTunnelBaseFinder extends Module {
 
             // try to place the block
             BlockHitResult hitResult = new BlockHitResult(
-                Vec3d.ofCenter(blockPlacementTarget),
+                Vec3.atCenterOf(blockPlacementTarget),
                 Direction.UP,
                 blockPlacementTarget,
                 false
             );
 
-            mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hitResult);
+            mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, hitResult);
 
             // switch back to what we had (but not if it was a pickaxe)
             if (currentSlot != blockSlot && !isPickaxeSlot(currentSlot)) {
-                mc.player.getInventory().selectedSlot = currentSlot;
+                mc.player.getInventory().setSelectedSlot(currentSlot);
             }
 
             return true;
@@ -1441,7 +1440,7 @@ public class PremiumTunnelBaseFinder extends Module {
 
     private ItemStack findBlockInInventory() {
         for (int i = 0; i < 36; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (!stack.isEmpty() && stack.getItem() instanceof BlockItem &&
                 !isPickaxeItem(stack) && !isFoodItem(stack)) {
                 return stack;
@@ -1452,7 +1451,7 @@ public class PremiumTunnelBaseFinder extends Module {
 
     private int findBlockSlot() {
         for (int i = 0; i < 9; i++) { // Check hotbar first
-            ItemStack stack = mc.player.getInventory().getStack(i);
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (!stack.isEmpty() && stack.getItem() instanceof BlockItem &&
                 !isPickaxeItem(stack) && !isFoodItem(stack)) {
                 return i;
@@ -1461,14 +1460,14 @@ public class PremiumTunnelBaseFinder extends Module {
 
         // if no block in hotbar, grab one from inventory
         for (int i = 9; i < 36; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (!stack.isEmpty() && stack.getItem() instanceof BlockItem &&
                 !isPickaxeItem(stack) && !isFoodItem(stack)) {
                 // move it to an empty hotbar slot
                 int emptySlot = findEmptyHotbarSlot();
                 if (emptySlot != -1) {
-                    mc.interactionManager.clickSlot(0, i, 0, net.minecraft.screen.slot.SlotActionType.PICKUP, mc.player);
-                    mc.interactionManager.clickSlot(0, emptySlot, 0, net.minecraft.screen.slot.SlotActionType.PICKUP, mc.player);
+                    mc.gameMode.handleContainerInput(0, i, 0, net.minecraft.world.inventory.ContainerInput.PICKUP, mc.player);
+                    mc.gameMode.handleContainerInput(0, emptySlot, 0, net.minecraft.world.inventory.ContainerInput.PICKUP, mc.player);
                     return emptySlot;
                 }
             }
@@ -1478,7 +1477,7 @@ public class PremiumTunnelBaseFinder extends Module {
 
     private int findEmptyHotbarSlot() {
         for (int i = 0; i < 9; i++) {
-            if (mc.player.getInventory().getStack(i).isEmpty()) {
+            if (mc.player.getInventory().getItem(i).isEmpty()) {
                 return i;
             }
         }
@@ -1490,24 +1489,24 @@ public class PremiumTunnelBaseFinder extends Module {
     }
 
     private boolean isFoodItem(ItemStack stack) {
-        return stack.getItem().getComponents() != null;
+        return stack.getItem().components() != null;
     }
 
     private boolean isPickaxeSlot(int slot) {
-        ItemStack stack = mc.player.getInventory().getStack(slot);
+        ItemStack stack = mc.player.getInventory().getItem(slot);
         return isPickaxeItem(stack);
     }
 
     // PLAYER DETECTION (with fast mouse movement so it looks real)
     private void checkForSuspiciousPlayers() {
-        if (mc.world == null || mc.player == null) return;
+        if (mc.level == null || mc.player == null) return;
 
         long currentTime = System.currentTimeMillis();
         // only check every 500ms so we don't spam
         if (currentTime - lastPlayerDetectionTime < 500) return;
         lastPlayerDetectionTime = currentTime;
 
-        for (var player : mc.world.getPlayers()) {
+        for (var player : mc.level.players()) {
             if (player == mc.player) continue; // Skip self
 
             double distance = mc.player.distanceTo(player);
@@ -1533,18 +1532,18 @@ public class PremiumTunnelBaseFinder extends Module {
 
                     playerDetected = true;
                     detectedPlayerName = playerName;
-                    detectedPlayerPos = player.getPos();
+                    detectedPlayerPos = player.position();
                     isRandomLooking = true;
                     isDirectStaring = false;
                     isMovingAway = false;
                     randomLookTicks = 0;
                     directStareTicks = 0;
                     moveAwaySteps = 0;
-                    playerDetectionStartPos = mc.player.getBlockPos();
+                    playerDetectionStartPos = mc.player.blockPosition();
 
                     // remember where we were looking
-                    originalYaw = mc.player.getYaw();
-                    originalPitch = mc.player.getPitch();
+                    originalYaw = mc.player.getYRot();
+                    originalPitch = mc.player.getXRot();
 
                     // look around randomly FAST (no smooth movement)
                     generateAndApplyRandomLookFast();
@@ -1560,7 +1559,7 @@ public class PremiumTunnelBaseFinder extends Module {
                     }
                 } else if (detectedPlayerName.equals(playerName)) {
                     // update where the player is (we already detected them)
-                    detectedPlayerPos = player.getPos();
+                    detectedPlayerPos = player.position();
                 }
                 return; // Only handle one player at a time
             }
@@ -1661,8 +1660,8 @@ public class PremiumTunnelBaseFinder extends Module {
         float newRandomPitch = (float) ((Math.random() - 0.5) * 60);
 
         // Apply IMMEDIATELY without smooth interpolation
-        mc.player.setYaw(newRandomYaw);
-        mc.player.setPitch(newRandomPitch);
+        mc.player.setYRot(newRandomYaw);
+        mc.player.setXRot(newRandomPitch);
 
         if (debugPlayerDetection.get() && notifications.get()) {
             info("Applied FAST random look: Yaw=" + String.format("%.1f", newRandomYaw) +
@@ -1670,8 +1669,8 @@ public class PremiumTunnelBaseFinder extends Module {
         }
     }
 
-    private void fastLookAtPosition(Vec3d targetPos) {
-        Vec3d playerPos = mc.player.getEyePos();
+    private void fastLookAtPosition(Vec3 targetPos) {
+        Vec3 playerPos = mc.player.getEyePosition();
         double diffX = targetPos.x - playerPos.x;
         double diffY = targetPos.y - playerPos.y;
         double diffZ = targetPos.z - playerPos.z;
@@ -1685,8 +1684,8 @@ public class PremiumTunnelBaseFinder extends Module {
         pitch += (float) ((Math.random() - 0.5) * 2.0); // ±1 degree randomness
 
         // Apply IMMEDIATELY without smooth interpolation
-        mc.player.setYaw(yaw);
-        mc.player.setPitch(pitch);
+        mc.player.setYRot(yaw);
+        mc.player.setXRot(pitch);
 
         if (debugPlayerDetection.get() && notifications.get()) {
             info("Applied FAST look at player: Yaw=" + String.format("%.1f", yaw) +
@@ -1726,8 +1725,8 @@ public class PremiumTunnelBaseFinder extends Module {
 
         // figure out which way to go to get away from the player
         if (detectedPlayerPos != null && mc.player != null) {
-            Vec3d playerPos = mc.player.getPos();
-            Vec3d directionAway = playerPos.subtract(detectedPlayerPos).normalize();
+            Vec3 playerPos = mc.player.position();
+            Vec3 directionAway = playerPos.subtract(detectedPlayerPos).normalize();
 
             // convert to a cardinal direction (prefer going backward)
             double angle = Math.atan2(directionAway.z, directionAway.x);
@@ -1773,7 +1772,7 @@ public class PremiumTunnelBaseFinder extends Module {
             }
 
             // check how far we actually moved
-            BlockPos currentPos = mc.player.getBlockPos();
+            BlockPos currentPos = mc.player.blockPosition();
             int actualDistance = (int) Math.abs(getDistanceInDirection(playerDetectionStartPos, currentPos, moveAwayDirection));
 
             if (actualDistance > moveAwaySteps) {
@@ -1801,12 +1800,12 @@ public class PremiumTunnelBaseFinder extends Module {
             case SOUTH -> 0.0f;
             case WEST -> 90.0f;
             case EAST -> -90.0f;
-            default -> mc.player.getYaw();
+            default -> mc.player.getYRot();
         };
 
         // apply it RIGHT NOW (no smooth movement during player detection)
-        mc.player.setYaw(yaw);
-        mc.player.setPitch(0.0f);
+        mc.player.setYRot(yaw);
+        mc.player.setXRot(0.0f);
 
         if (debugPlayerDetection.get() && notifications.get()) {
             info("Applied FAST directional look: " + direction + " (Yaw=" + yaw + ")");
@@ -1815,7 +1814,7 @@ public class PremiumTunnelBaseFinder extends Module {
 
     private void handleBasicBackup() {
         if (backupSteps < safetyBackupDistance.get()) {
-            BlockPos currentPos = mc.player.getBlockPos();
+            BlockPos currentPos = mc.player.blockPosition();
             int actualBackupDistance = (int) Math.abs(getDistanceInDirection(backupStartPos, currentPos, currentDirection.getOpposite()));
 
             if (actualBackupDistance < safetyBackupDistance.get()) {
@@ -1854,8 +1853,8 @@ public class PremiumTunnelBaseFinder extends Module {
     private void addNaturalLookVariation() {
         if (isSmoothLooking || isRandomLooking || isDirectStaring || isMovingAway) return;
 
-        float currentYaw = mc.player.getYaw();
-        float currentPitch = mc.player.getPitch();
+        float currentYaw = mc.player.getYRot();
+        float currentPitch = mc.player.getXRot();
 
         // add small random variations
         float yawVariation = (float) ((Math.random() - 0.5) * lookRandomization.get());
@@ -1867,8 +1866,8 @@ public class PremiumTunnelBaseFinder extends Module {
     private void addBriefLookAround() {
         if (isSmoothLooking || isRandomLooking || isDirectStaring || isMovingAway) return;
 
-        float currentYaw = mc.player.getYaw();
-        float currentPitch = mc.player.getPitch();
+        float currentYaw = mc.player.getYRot();
+        float currentPitch = mc.player.getXRot();
 
         // quick look to the side (15-45 degrees)
         float lookDirection = Math.random() > 0.5 ? 1 : -1;
@@ -1933,8 +1932,8 @@ public class PremiumTunnelBaseFinder extends Module {
         }
 
         // apply the smooth look
-        mc.player.setYaw(currentYaw);
-        mc.player.setPitch(currentPitch);
+        mc.player.setYRot(currentYaw);
+        mc.player.setXRot(currentPitch);
 
         // check if we're close enough to the target
         if (Math.abs(yawDiff) <= 0.5f && Math.abs(pitchDiff) <= 0.5f) {
@@ -1977,8 +1976,8 @@ public class PremiumTunnelBaseFinder extends Module {
         }
     }
 
-    private void smoothLookAtPosition(Vec3d targetPos, boolean isMining) {
-        Vec3d playerPos = mc.player.getEyePos();
+    private void smoothLookAtPosition(Vec3 targetPos, boolean isMining) {
+        Vec3 playerPos = mc.player.getEyePosition();
         double diffX = targetPos.x - playerPos.x;
         double diffY = targetPos.y - playerPos.y;
         double diffZ = targetPos.z - playerPos.z;
@@ -1998,13 +1997,13 @@ public class PremiumTunnelBaseFinder extends Module {
 
     // LAVA DETECTION AND AVOIDANCE (don't die pls)
     private boolean detectOtherDangers() {
-        BlockPos playerPos = mc.player.getBlockPos();
+        BlockPos playerPos = mc.player.blockPosition();
 
         // check 5 blocks ahead for other dangerous stuff
         for (int i = 1; i <= 5; i++) {
-            BlockPos checkPos = playerPos.offset(currentDirection, i);
-            BlockState state = mc.world.getBlockState(checkPos);
-            BlockState stateAbove = mc.world.getBlockState(checkPos.up());
+            BlockPos checkPos = playerPos.relative(currentDirection, i);
+            BlockState state = mc.level.getBlockState(checkPos);
+            BlockState stateAbove = mc.level.getBlockState(checkPos.above());
 
             // check for falling blocks (gravel/sand)
             if (avoidGravel.get() && (state.getBlock() instanceof FallingBlock || stateAbove.getBlock() instanceof FallingBlock)) {
@@ -2038,7 +2037,7 @@ public class PremiumTunnelBaseFinder extends Module {
 
             isLavaAvoidance = true;
             lavaAvoidancePhase = 0;
-            lavaAvoidanceStartPos = mc.player.getBlockPos();
+            lavaAvoidanceStartPos = mc.player.blockPosition();
             lavaAvoidanceSteps = 0;
             rightSideChecked = false;
             leftSideChecked = false;
@@ -2077,7 +2076,7 @@ public class PremiumTunnelBaseFinder extends Module {
     }
 
     private void handleLavaBackup() {
-        BlockPos currentPos = mc.player.getBlockPos();
+        BlockPos currentPos = mc.player.blockPosition();
         int backupDistance = (int) Math.abs(getDistanceInDirection(lavaAvoidanceStartPos, currentPos, currentDirection.getOpposite()));
 
         if (backupDistance < safetyBackupDistance.get()) {
@@ -2094,9 +2093,9 @@ public class PremiumTunnelBaseFinder extends Module {
     }
 
     private void chooseLavaAvoidanceDirection() {
-        BlockPos currentPos = mc.player.getBlockPos();
-        Direction rightDir = originalDirection.rotateYClockwise();
-        Direction leftDir = originalDirection.rotateYCounterclockwise();
+        BlockPos currentPos = mc.player.blockPosition();
+        Direction rightDir = originalDirection.getClockWise();
+        Direction leftDir = originalDirection.getCounterClockWise();
 
         if (!rightSideChecked) {
             rightSideSafe = isPathSafeForDistance(currentPos, rightDir, lavaAvoidanceDistance.get());
@@ -2144,7 +2143,7 @@ public class PremiumTunnelBaseFinder extends Module {
             performMining();
 
             // count how far we actually moved
-            BlockPos currentPos = mc.player.getBlockPos();
+            BlockPos currentPos = mc.player.blockPosition();
             int actualDistance = (int) Math.abs(getDistanceInDirection(lavaAvoidanceStartPos, currentPos, lavaAvoidanceDirection));
 
             if (actualDistance > lavaAvoidanceSteps) {
@@ -2154,8 +2153,8 @@ public class PremiumTunnelBaseFinder extends Module {
             // done mining sideways, check if the original path is clear now
             if (notifications.get()) info("Sideways mining complete (" + lavaAvoidanceSteps + " blocks). Checking original path...");
 
-            BlockPos currentPos = mc.player.getBlockPos();
-            BlockPos checkPos = currentPos.offset(originalDirection, 5);
+            BlockPos currentPos = mc.player.blockPosition();
+            BlockPos checkPos = currentPos.relative(originalDirection, 5);
 
             if (!detectDangerAt(checkPos) && !detectLavaInArea(checkPos)) {
                 // original path is clear, go back to it
@@ -2209,7 +2208,7 @@ public class PremiumTunnelBaseFinder extends Module {
     }
 
     private void handleLavaBackwardAttempt() {
-        BlockPos currentPos = mc.player.getBlockPos();
+        BlockPos currentPos = mc.player.blockPosition();
         Direction backwardDir = originalDirection.getOpposite();
 
         // check if going backward is safe
@@ -2229,12 +2228,12 @@ public class PremiumTunnelBaseFinder extends Module {
             }
         } else {
             // check if there are blocks behind us we can break
-            BlockPos behindPos = currentPos.offset(backwardDir);
-            BlockState behindState = mc.world.getBlockState(behindPos);
-            BlockState behindStateUp = mc.world.getBlockState(behindPos.up());
+            BlockPos behindPos = currentPos.relative(backwardDir);
+            BlockState behindState = mc.level.getBlockState(behindPos);
+            BlockState behindStateUp = mc.level.getBlockState(behindPos.above());
 
             boolean hasBlocksBehind = (!behindState.isAir() && isBlockSafeToBreak(behindPos)) ||
-                (!behindStateUp.isAir() && isBlockSafeToBreak(behindPos.up()));
+                (!behindStateUp.isAir() && isBlockSafeToBreak(behindPos.above()));
 
             if (hasBlocksBehind) {
                 if (notifications.get()) info("Cannot go backward (lava/gravel), but blocks behind detected. Turning 180 degrees to break blocks...");
@@ -2244,16 +2243,16 @@ public class PremiumTunnelBaseFinder extends Module {
 
                 if (!behindState.isAir() && isBlockSafeToBreak(behindPos)) {
                     backwardBlockToBreak = behindPos;
-                } else if (!behindStateUp.isAir() && isBlockSafeToBreak(behindPos.up())) {
-                    backwardBlockToBreak = behindPos.up();
+                } else if (!behindStateUp.isAir() && isBlockSafeToBreak(behindPos.above())) {
+                    backwardBlockToBreak = behindPos.above();
                 }
             } else {
                 if (notifications.get()) warning("Cannot go backward and no blocks to break. Stuck! Trying random direction...");
-                Direction randomDir = Math.random() > 0.5 ? originalDirection.rotateYClockwise() : originalDirection.rotateYCounterclockwise();
+                Direction randomDir = Math.random() > 0.5 ? originalDirection.getClockWise() : originalDirection.getCounterClockWise();
                 lavaAvoidanceDirection = randomDir;
                 lavaAvoidancePhase = 2;
                 currentDirection = randomDir;
-                if (notifications.get()) info("Attempting random direction: " + (randomDir == originalDirection.rotateYClockwise() ? "right" : "left"));
+                if (notifications.get()) info("Attempting random direction: " + (randomDir == originalDirection.getClockWise() ? "right" : "left"));
             }
         }
     }
@@ -2276,20 +2275,20 @@ public class PremiumTunnelBaseFinder extends Module {
         performMiningAction();
 
         // check if we broke it
-        if (mc.world.getBlockState(backwardBlockToBreak).isAir()) {
+        if (mc.level.getBlockState(backwardBlockToBreak).isAir()) {
             if (notifications.get()) info("✅ Block behind cleared. Checking for more blocks or resuming...");
             backwardBreakAttempts = 0;
 
             // check if there are more blocks behind us
-            BlockPos currentPos = mc.player.getBlockPos();
-            BlockPos nextBehind = currentPos.offset(backwardDir);
-            BlockState nextBehindState = mc.world.getBlockState(nextBehind);
-            BlockState nextBehindStateUp = mc.world.getBlockState(nextBehind.up());
+            BlockPos currentPos = mc.player.blockPosition();
+            BlockPos nextBehind = currentPos.relative(backwardDir);
+            BlockState nextBehindState = mc.level.getBlockState(nextBehind);
+            BlockState nextBehindStateUp = mc.level.getBlockState(nextBehind.above());
 
             if (!nextBehindState.isAir() && isBlockSafeToBreak(nextBehind)) {
                 backwardBlockToBreak = nextBehind;
-            } else if (!nextBehindStateUp.isAir() && isBlockSafeToBreak(nextBehind.up())) {
-                backwardBlockToBreak = nextBehind.up();
+            } else if (!nextBehindStateUp.isAir() && isBlockSafeToBreak(nextBehind.above())) {
+                backwardBlockToBreak = nextBehind.above();
             } else {
                 // no more blocks, check if going backward is safe now
                 boolean backwardNowSafe = isPathSafeForDistance(currentPos, backwardDir, safetyBackupDistance.get());
@@ -2322,10 +2321,10 @@ public class PremiumTunnelBaseFinder extends Module {
 
     private boolean isPathSafeForDistance(BlockPos startPos, Direction direction, int distance) {
         for (int i = 1; i <= distance; i++) {
-            BlockPos checkPos = startPos.offset(direction, i);
+            BlockPos checkPos = startPos.relative(direction, i);
 
             // check the current level and above for dangerous stuff
-            if (detectDangerAt(checkPos) || detectDangerAt(checkPos.up()) || detectLavaInArea(checkPos)) {
+            if (detectDangerAt(checkPos) || detectDangerAt(checkPos.above()) || detectLavaInArea(checkPos)) {
                 return false;
             }
         }
@@ -2337,8 +2336,8 @@ public class PremiumTunnelBaseFinder extends Module {
         for (int x = -1; x <= 1; x++) {
             for (int y = -1; y <= 1; y++) {
                 for (int z = -1; z <= 1; z++) {
-                    BlockPos checkPos = center.add(x, y, z);
-                    if (isLava(mc.world.getBlockState(checkPos))) {
+                    BlockPos checkPos = center.offset(x, y, z);
+                    if (isLava(mc.level.getBlockState(checkPos))) {
                         return true;
                     }
                 }
@@ -2349,7 +2348,7 @@ public class PremiumTunnelBaseFinder extends Module {
 
     private boolean isLava(BlockState state) {
         return state.getBlock() == Blocks.LAVA ||
-            (state.getBlock() instanceof FluidBlock && state.getBlock() == Blocks.LAVA);
+            (state.getBlock() instanceof LiquidBlock && state.getBlock() == Blocks.LAVA);
     }
 
     private boolean isLargeAirPocket(BlockPos center) {
@@ -2358,8 +2357,8 @@ public class PremiumTunnelBaseFinder extends Module {
         for (int x = -1; x <= 1; x++) {
             for (int y = -1; y <= 1; y++) {
                 for (int z = -1; z <= 1; z++) {
-                    BlockPos checkPos = center.add(x, y, z);
-                    if (mc.world.getBlockState(checkPos).isAir()) {
+                    BlockPos checkPos = center.offset(x, y, z);
+                    if (mc.level.getBlockState(checkPos).isAir()) {
                         airBlocks++;
                     }
                 }
@@ -2370,10 +2369,10 @@ public class PremiumTunnelBaseFinder extends Module {
 
     private void handleDangerAvoidance() {
         if (!isBackingUp) {
-            if (notifications.get()) warning("⚠️ " + dangerType + " detected ahead! Backing up " + safetyBackupDistance.get() + " blocks...");
+            if (notifications.get()) warning("âš ï¸ " + dangerType + " detected ahead! Backing up " + safetyBackupDistance.get() + " blocks...");
 
             if (enableWebhook.get() && screenshotOnDanger.get()) {
-                takeScreenshotAndSend("⚠️ Danger Detected",
+                takeScreenshotAndSend("âš ï¸ Danger Detected",
                     "Found " + dangerType + " at " + dangerousBlockPos.toShortString() +
                         ". Backing up " + safetyBackupDistance.get() + " blocks for safety.");
             }
@@ -2381,7 +2380,7 @@ public class PremiumTunnelBaseFinder extends Module {
             isBackingUp = true;
             backupSteps = 0;
             backupStuckTicks = 0;
-            backupStartPos = mc.player.getBlockPos(); // Store starting position for backup
+            backupStartPos = mc.player.blockPosition(); // Store starting position for backup
         }
     }
 
@@ -2389,12 +2388,12 @@ public class PremiumTunnelBaseFinder extends Module {
         if (avoidanceSteps < antiStuckDistance.get() + 2) {
             // Turn camera to avoidance direction and move forward with W
             Direction avoidanceDir = randomizeAvoidanceDirection.get() && !hasRandomizedAvoidanceDirection ?
-                (Math.random() > 0.5 ? originalDirection.rotateYClockwise() : originalDirection.rotateYCounterclockwise()) :
-                originalDirection.rotateYClockwise();
+                (Math.random() > 0.5 ? originalDirection.getClockWise() : originalDirection.getCounterClockWise()) :
+                originalDirection.getClockWise();
 
             if (randomizeAvoidanceDirection.get() && !hasRandomizedAvoidanceDirection) {
                 hasRandomizedAvoidanceDirection = true;
-                if (notifications.get()) info("🎲 Randomly chose " + (avoidanceDir == originalDirection.rotateYClockwise() ? "right" : "left") + " for avoidance");
+                if (notifications.get()) info("🎲 Randomly chose " + (avoidanceDir == originalDirection.getClockWise() ? "right" : "left") + " for avoidance");
             }
 
             // Turn camera to face the avoidance direction, then use W to move
@@ -2403,7 +2402,7 @@ public class PremiumTunnelBaseFinder extends Module {
             avoidanceSteps++;
             } else {
             // Check if original path is clear
-            BlockPos checkPos = mc.player.getBlockPos().offset(originalDirection, 3);
+            BlockPos checkPos = mc.player.blockPosition().relative(originalDirection, 3);
             if (!detectDangerAt(checkPos) && !detectLavaInArea(checkPos)) {
                 if (notifications.get()) info("Danger avoided. Returning to original direction.");
                 isAvoiding = false;
@@ -2418,16 +2417,16 @@ public class PremiumTunnelBaseFinder extends Module {
             } else {
                 // Try other direction
                 currentDirection = randomizeAvoidanceDirection.get() ?
-                    (Math.random() > 0.5 ? originalDirection.rotateYClockwise() : originalDirection.rotateYCounterclockwise()) :
-                    originalDirection.rotateYCounterclockwise();
+                    (Math.random() > 0.5 ? originalDirection.getClockWise() : originalDirection.getCounterClockWise()) :
+                    originalDirection.getCounterClockWise();
                 avoidanceSteps = 0;
             }
         }
     }
 
     private boolean detectDangerAt(BlockPos pos) {
-        BlockState state = mc.world.getBlockState(pos);
-        BlockState stateAbove = mc.world.getBlockState(pos.up());
+        BlockState state = mc.level.getBlockState(pos);
+        BlockState stateAbove = mc.level.getBlockState(pos.above());
 
         return (avoidLava.get() && isLava(state)) ||
             (avoidGravel.get() && (state.getBlock() instanceof FallingBlock || stateAbove.getBlock() instanceof FallingBlock)) ||
@@ -2435,8 +2434,8 @@ public class PremiumTunnelBaseFinder extends Module {
     }
 
     private boolean isBlockSafeToBreak(BlockPos pos) {
-        if (pos == null || mc.world == null) return false;
-        BlockState state = mc.world.getBlockState(pos);
+        if (pos == null || mc.level == null) return false;
+        BlockState state = mc.level.getBlockState(pos);
         Block block = state.getBlock();
 
         if (block == Blocks.AIR) return false;
@@ -2444,18 +2443,18 @@ public class PremiumTunnelBaseFinder extends Module {
         if (isLava(state)) return false;
         if (block instanceof FallingBlock) return false;
 
-        String blockName = block.getTranslationKey().toLowerCase();
+        String blockName = block.getDescriptionId().toLowerCase();
         if (blockName.contains("water") || blockName.contains("lava")) return false;
 
         return true;
     }
 
     private boolean isLavaOrGravelNearby(BlockPos pos) {
-        if (pos == null || mc.world == null) return false;
+        if (pos == null || mc.level == null) return false;
 
         for (Direction dir : Direction.values()) {
-            BlockPos checkPos = pos.offset(dir);
-            BlockState state = mc.world.getBlockState(checkPos);
+            BlockPos checkPos = pos.relative(dir);
+            BlockState state = mc.level.getBlockState(checkPos);
 
             if (isLava(state)) return true;
             if (state.getBlock() instanceof FallingBlock) return true;
@@ -2465,7 +2464,7 @@ public class PremiumTunnelBaseFinder extends Module {
     }
 
     private void checkStuckCondition() {
-        BlockPos currentPos = mc.player.getBlockPos();
+        BlockPos currentPos = mc.player.blockPosition();
 
         // check if we moved or mined any blocks
         if (currentPos.equals(lastPlayerPos) && blocksMined == lastBlocksMined) {
@@ -2502,12 +2501,12 @@ public class PremiumTunnelBaseFinder extends Module {
         if (avoidanceSteps < antiStuckDistance.get()) {
             // try moving sideways (maybe random direction)
             Direction sideDirection = randomizeAvoidanceDirection.get() && !hasRandomizedAvoidanceDirection ?
-                (Math.random() > 0.5 ? originalDirection.rotateYClockwise() : originalDirection.rotateYCounterclockwise()) :
-                (avoidanceSteps % 2 == 0) ? originalDirection.rotateYClockwise() : originalDirection.rotateYCounterclockwise();
+                (Math.random() > 0.5 ? originalDirection.getClockWise() : originalDirection.getCounterClockWise()) :
+                (avoidanceSteps % 2 == 0) ? originalDirection.getClockWise() : originalDirection.getCounterClockWise();
 
             if (randomizeAvoidanceDirection.get() && !hasRandomizedAvoidanceDirection) {
                 hasRandomizedAvoidanceDirection = true;
-                if (notifications.get()) info("🎲 Randomly chose " + (sideDirection == originalDirection.rotateYClockwise() ? "right" : "left") + " for stuck movement");
+                if (notifications.get()) info("🎲 Randomly chose " + (sideDirection == originalDirection.getClockWise() ? "right" : "left") + " for stuck movement");
             }
 
             lookInDirection(sideDirection);
@@ -2532,24 +2531,24 @@ public class PremiumTunnelBaseFinder extends Module {
 
     private void updateBlocksToMine() {
         blocksToMine.clear();
-            BlockPos playerPos = mc.player.getBlockPos();
+            BlockPos playerPos = mc.player.blockPosition();
 
         if (pickaxeType.get() == PickaxeType.AMETHYST) {
-            // ᴀᴍᴇᴛʜʏѕᴛ ᴘɪᴄᴋᴀхᴇ: Only target the center block (it mines 3x3)
-            BlockPos centerBlock = playerPos.offset(currentDirection).up(); // Target center block at eye level
-            if (!mc.world.getBlockState(centerBlock).isAir()) {
+            // á´€á´á´‡á´›ÊœÊÑ•á´› á´˜Éªá´„á´‹á´€Ñ…á´‡: Only target the center block (it mines 3x3)
+            BlockPos centerBlock = playerPos.relative(currentDirection).above(); // Target center block at eye level
+            if (!mc.level.getBlockState(centerBlock).isAir()) {
                 blocksToMine.add(centerBlock);
             }
         } else {
             // Normal pickaxe: Mine 2x2 area in front of player with improved targeting
-            BlockPos base = playerPos.offset(currentDirection);
+            BlockPos base = playerPos.relative(currentDirection);
 
             // Add blocks in order of priority to reduce jarring look movements
-            if (!mc.world.getBlockState(base).isAir()) {
+            if (!mc.level.getBlockState(base).isAir()) {
                 blocksToMine.add(base);           // Bottom block first
             }
-            if (!mc.world.getBlockState(base.up()).isAir()) {
-                blocksToMine.add(base.up());      // Top block second
+            if (!mc.level.getBlockState(base.above()).isAir()) {
+                blocksToMine.add(base.above());      // Top block second
             }
         }
 
@@ -2583,7 +2582,7 @@ public class PremiumTunnelBaseFinder extends Module {
         performMiningAction();
 
         // check if we broke the block
-        if (mc.world.getBlockState(currentTarget).isAir()) {
+        if (mc.level.getBlockState(currentTarget).isAir()) {
             blocksMined++;
             blocksToMine.remove(currentTarget);
             currentTarget = null;
@@ -2596,8 +2595,8 @@ public class PremiumTunnelBaseFinder extends Module {
     private void performMiningAction() {
         // hold left click if it's enabled
         if (holdLeftClick.get()) {
-            if (mc.options != null && mc.options.attackKey != null) {
-                mc.options.attackKey.setPressed(true);
+            if (mc.options != null && mc.options.keyAttack != null) {
+                mc.options.keyAttack.setDown(true);
             }
         }
     }
@@ -2609,33 +2608,28 @@ public class PremiumTunnelBaseFinder extends Module {
         if (currentTime - lastRightClickTime < rightClickInterval.get() * 50) return;
 
         // right click to fix ghost blocks
-        if (mc.options != null && mc.options.useKey != null) {
-            mc.options.useKey.setPressed(true);
+        if (mc.options != null && mc.options.keyUse != null) {
+            mc.options.keyUse.setDown(true);
 
-            // let go after a short delay
-            CompletableFuture.runAsync(() -> {
-                try {
-                    Thread.sleep(50); // 50ms click
-                    if (mc.options != null && mc.options.useKey != null) {
-                        mc.options.useKey.setPressed(false);
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+            // let go on the main thread, was setting keys from a random pool thread before
+            GlazedScheduler.schedule(() -> {
+                if (mc.options != null && mc.options.keyUse != null) {
+                    mc.options.keyUse.setDown(false);
                 }
-            });
+            }, 50, TimeUnit.MILLISECONDS);
         }
 
         lastRightClickTime = currentTime;
     }
 
     private void handleMovement() {
-        BlockPos playerPos = mc.player.getBlockPos();
-        BlockPos frontBottom = playerPos.offset(currentDirection);
-        BlockPos frontTop = frontBottom.up();
+        BlockPos playerPos = mc.player.blockPosition();
+        BlockPos frontBottom = playerPos.relative(currentDirection);
+        BlockPos frontTop = frontBottom.above();
 
         // check if we can move forward
-        boolean canMoveForward = mc.world.getBlockState(frontBottom).isAir() &&
-            mc.world.getBlockState(frontTop).isAir();
+        boolean canMoveForward = mc.level.getBlockState(frontBottom).isAir() &&
+            mc.level.getBlockState(frontTop).isAir();
 
         if (canMoveForward) {
             moveInDirection(currentDirection);
@@ -2645,20 +2639,20 @@ public class PremiumTunnelBaseFinder extends Module {
     // MOVEMENT METHODS (only using W and S keys)
     private void stopAllMovement() {
         if (mc.options != null) {
-            mc.options.forwardKey.setPressed(false);
-            mc.options.backKey.setPressed(false);
-            mc.options.leftKey.setPressed(false);   // Never used anyway
-            mc.options.rightKey.setPressed(false);  // Never used anyway
+            mc.options.keyUp.setDown(false);
+            mc.options.keyDown.setDown(false);
+            mc.options.keyLeft.setDown(false);   // Never used anyway
+            mc.options.keyRight.setDown(false);  // Never used anyway
         }
     }
 
     private void moveBackward() {
         // keep looking where we are and press S to go backward
         if (mc.options != null) {
-            mc.options.backKey.setPressed(true);
-            mc.options.forwardKey.setPressed(false);
-            mc.options.leftKey.setPressed(false);   // Never use
-            mc.options.rightKey.setPressed(false);  // Never use
+            mc.options.keyDown.setDown(true);
+            mc.options.keyUp.setDown(false);
+            mc.options.keyLeft.setDown(false);   // Never use
+            mc.options.keyRight.setDown(false);  // Never use
         }
     }
 
@@ -2666,10 +2660,10 @@ public class PremiumTunnelBaseFinder extends Module {
         // turn to face the direction, then press W to go forward
         lookInDirection(direction);
         if (mc.options != null) {
-            mc.options.forwardKey.setPressed(true);
-            mc.options.backKey.setPressed(false);
-            mc.options.leftKey.setPressed(false);   // Never use
-            mc.options.rightKey.setPressed(false);  // Never use
+            mc.options.keyUp.setDown(true);
+            mc.options.keyDown.setDown(false);
+            mc.options.keyLeft.setDown(false);   // Never use
+            mc.options.keyRight.setDown(false);  // Never use
         }
     }
 
@@ -2677,26 +2671,26 @@ public class PremiumTunnelBaseFinder extends Module {
         if (mc.options == null) return;
 
         // reset all movement keys first - we only use W and S
-        mc.options.forwardKey.setPressed(false);
-        mc.options.backKey.setPressed(false);
-        mc.options.leftKey.setPressed(false);   // Never use these
-        mc.options.rightKey.setPressed(false);  // Never use these
+        mc.options.keyUp.setDown(false);
+        mc.options.keyDown.setDown(false);
+        mc.options.keyLeft.setDown(false);   // Never use these
+        mc.options.keyRight.setDown(false);  // Never use these
 
         // get which way we're facing
-        Direction playerFacing = mc.player.getHorizontalFacing();
+        Direction playerFacing = mc.player.getDirection();
 
         if (direction == playerFacing) {
             // face that direction and press W to go forward
             lookInDirection(direction);
-            mc.options.forwardKey.setPressed(true);
+            mc.options.keyUp.setDown(true);
         } else if (direction == playerFacing.getOpposite()) {
             // turn around to face that direction, then press W to go forward
             lookInDirection(direction);
-            mc.options.forwardKey.setPressed(true);
+            mc.options.keyUp.setDown(true);
                         } else {
             // for any other direction (left/right), turn to face it then press W to go forward
             lookInDirection(direction);
-            mc.options.forwardKey.setPressed(true);
+            mc.options.keyUp.setDown(true);
         }
 
         // special case for going up/down (y level adjustment)
@@ -2721,7 +2715,7 @@ public class PremiumTunnelBaseFinder extends Module {
             case SOUTH -> 0.0f;
             case WEST -> 90.0f;
             case EAST -> -90.0f;
-            default -> mc.player.getYaw();
+            default -> mc.player.getYRot();
         };
 
         // use smooth looking for normal mining (when adaptive smoothing is on)
@@ -2729,8 +2723,8 @@ public class PremiumTunnelBaseFinder extends Module {
             setTargetLook(yaw, 0.0f, true); // true = mining look
             } else {
             // if adaptive smoothing is off, just look there right away
-            mc.player.setYaw(yaw);
-            mc.player.setPitch(0.0f);
+            mc.player.setYRot(yaw);
+            mc.player.setXRot(0.0f);
         }
     }
 
@@ -2738,8 +2732,8 @@ public class PremiumTunnelBaseFinder extends Module {
         // Don't override player detection looking
         if (isRandomLooking || isDirectStaring || isMovingAway) return;
 
-        Vec3d playerVec = mc.player.getEyePos();
-        Vec3d targetVec = Vec3d.ofCenter(targetBlock);
+        Vec3 playerVec = mc.player.getEyePosition();
+        Vec3 targetVec = Vec3.atCenterOf(targetBlock);
         double diffX = targetVec.x - playerVec.x;
         double diffY = targetVec.y - playerVec.y;
         double diffZ = targetVec.z - playerVec.z;
@@ -2748,8 +2742,8 @@ public class PremiumTunnelBaseFinder extends Module {
         float yaw = (float) Math.toDegrees(Math.atan2(diffZ, diffX)) - 90.0F;
         float pitch = (float) Math.toDegrees(-Math.atan2(diffY, distXZ));
 
-        mc.player.setYaw(yaw);
-        mc.player.setPitch(pitch);
+        mc.player.setYRot(yaw);
+        mc.player.setXRot(pitch);
     }
 
     private void smoothLookAtBlock(BlockPos targetBlock) {
@@ -2764,8 +2758,8 @@ public class PremiumTunnelBaseFinder extends Module {
             return;
         }
 
-        Vec3d playerVec = mc.player.getEyePos();
-        Vec3d targetVec = Vec3d.ofCenter(targetBlock);
+        Vec3 playerVec = mc.player.getEyePosition();
+        Vec3 targetVec = Vec3.atCenterOf(targetBlock);
 
         smoothLookAtPosition(targetVec, true); // true = mining look
     }
@@ -2783,15 +2777,15 @@ public class PremiumTunnelBaseFinder extends Module {
     private void releaseAllKeys() {
         if (mc.options == null) return;
 
-        mc.options.attackKey.setPressed(false);
-        mc.options.useKey.setPressed(false);
-        mc.options.forwardKey.setPressed(false);
-        mc.options.backKey.setPressed(false);
-        mc.options.leftKey.setPressed(false);
-        mc.options.rightKey.setPressed(false);
+        mc.options.keyAttack.setDown(false);
+        mc.options.keyUse.setDown(false);
+        mc.options.keyUp.setDown(false);
+        mc.options.keyDown.setDown(false);
+        mc.options.keyLeft.setDown(false);
+        mc.options.keyRight.setDown(false);
 
-        if (mc.interactionManager != null) {
-            mc.interactionManager.cancelBlockBreaking();
+        if (mc.gameMode != null) {
+            mc.gameMode.stopDestroyBlock();
         }
     }
 
@@ -2810,12 +2804,12 @@ public class PremiumTunnelBaseFinder extends Module {
 
         CompletableFuture.runAsync(() -> {
             try {
-                ScreenshotRecorder.saveScreenshot(
-                    mc.runDirectory,
-                    mc.getFramebuffer(),
+                Screenshot.grab(
+                    mc.gameDirectory,
+                    mc.getMainRenderTarget(),
                     (text) -> {
                         try {
-                            File screenshotsDir = new File(mc.runDirectory, "screenshots");
+                            File screenshotsDir = new File(mc.gameDirectory, "screenshots");
                             File[] screenshots = screenshotsDir.listFiles((dir, name) -> name.endsWith(".png"));
 
                             if (screenshots != null && screenshots.length > 0) {
@@ -2836,7 +2830,7 @@ public class PremiumTunnelBaseFinder extends Module {
                         } catch (Exception e) {
                             if (notifications.get()) error("Failed to process screenshot: " + e.getMessage());
                             if (debugMode.get()) {
-                                e.printStackTrace();
+                                LOG.error("Unhandled error in " + getClass().getSimpleName(), e);
                             }
                         }
                     }
@@ -2844,115 +2838,30 @@ public class PremiumTunnelBaseFinder extends Module {
             } catch (Exception e) {
                 if (notifications.get()) error("Failed to take screenshot: " + e.getMessage());
                 if (debugMode.get()) {
-                    e.printStackTrace();
+                    LOG.error("Unhandled error in " + getClass().getSimpleName(), e);
                 }
             }
         });
     }
 
     private void sendWebhookWithImage(String title, String description, File imageFile) {
-        try {
-            if (debugMode.get() && notifications.get()) {
-                info("Sending webhook to: " + webhookUrl.get().substring(0, Math.min(50, webhookUrl.get().length())) + "...");
-            }
+        String playerName = mc.player != null ? mc.player.getName().getString() : "Unknown";
+        String position = mc.player != null ? mc.player.blockPosition().toShortString() : "Unknown";
+        String timestamp = java.time.Instant.now().toString();
 
-            URI uri = URI.create(webhookUrl.get());
-            URL url = uri.toURL();
-            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-
-            String boundary = "----WebKitFormBoundary" + System.currentTimeMillis();
-            connection.setRequestMethod("POST");
-            connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
-            connection.setRequestProperty("User-Agent", "TunnelBaseFinder/3.0");
-            connection.setDoOutput(true);
-            connection.setConnectTimeout(10000);
-            connection.setReadTimeout(10000);
-
-            String playerName = mc.player != null ? mc.player.getName().getString() : "Unknown";
-            String position = mc.player != null ? mc.player.getBlockPos().toShortString() : "Unknown";
-            String timestamp = java.time.Instant.now().toString();
-            String pickaxeInfo = pickaxeType.get().toString();
-
-            String escapedTitle = escapeJson(title);
-            String escapedDescription = escapeJson(description);
-            String escapedPlayerName = escapeJson(playerName);
-            String escapedPosition = escapeJson(position);
-            String escapedPickaxeInfo = escapeJson(pickaxeInfo);
-
-            String jsonPayload = String.format(
-                "{\"embeds\":[{\"title\":\"%s\",\"description\":\"%s\\n\\n**Player:** %s\\n**Position:** %s\\n**Pickaxe:** %s\\n**Time:** %s\",\"color\":16711680,\"image\":{\"url\":\"attachment://screenshot.png\"},\"footer\":{\"text\":\"TunnelBaseFinder v3.0 Enhanced\"}}]}",
-                escapedTitle, escapedDescription, escapedPlayerName, escapedPosition, escapedPickaxeInfo, timestamp
-            );
-
-            if (debugMode.get() && notifications.get()) {
-                info("JSON Payload: " + jsonPayload);
-            }
-
-            try (OutputStream os = connection.getOutputStream()) {
-                PrintWriter writer = new PrintWriter(new OutputStreamWriter(os, "UTF-8"));
-
-                writer.write("--" + boundary + "\r\n");
-                writer.write("Content-Disposition: form-data; name=\"payload_json\"\r\n");
-                writer.write("Content-Type: application/json; charset=UTF-8\r\n");
-                writer.write("\r\n");
-                writer.write(jsonPayload);
-                writer.write("\r\n");
-                writer.flush();
-
-                writer.write("--" + boundary + "\r\n");
-                writer.write("Content-Disposition: form-data; name=\"file\"; filename=\"screenshot.png\"\r\n");
-                writer.write("Content-Type: image/png\r\n");
-                writer.write("\r\n");
-                writer.flush();
-
-                try (FileInputStream fis = new FileInputStream(imageFile)) {
-                    byte[] buffer = new byte[8192];
-                    int bytesRead;
-                    while ((bytesRead = fis.read(buffer)) != -1) {
-                        os.write(buffer, 0, bytesRead);
-                    }
-                }
-                os.flush();
-
-                writer.write("\r\n");
-                writer.write("--" + boundary + "--\r\n");
-                writer.flush();
-            }
-
-            int responseCode = connection.getResponseCode();
-            if (responseCode == 200 || responseCode == 204) {
-                webhookStatus = "Last sent: Success";
-                if (debugMode.get() && notifications.get()) {
-                    info("Screenshot sent to webhook successfully (Code: " + responseCode + ")");
-                }
-            } else {
-                webhookStatus = "Last sent: Failed (" + responseCode + ")";
-                if (notifications.get()) warning("Webhook failed with response code: " + responseCode);
-
-                if (debugMode.get()) {
-                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(
-                        responseCode >= 400 ? connection.getErrorStream() : connection.getInputStream()))) {
-                        String line;
-                        StringBuilder errorResponse = new StringBuilder();
-                        while ((line = reader.readLine()) != null) {
-                            errorResponse.append(line).append("\n");
-                        }
-                        if (notifications.get()) warning("Response body: " + errorResponse.toString());
-        } catch (Exception e) {
-                        if (notifications.get()) warning("Could not read error response: " + e.getMessage());
-                    }
-                }
-            }
-
-            connection.disconnect();
-
-        } catch (Exception e) {
-            webhookStatus = "Last sent: Error - " + e.getMessage();
-            if (notifications.get()) error("Failed to send webhook: " + e.getMessage());
-            if (debugMode.get()) {
-                e.printStackTrace();
-            }
-        }
+        GlazedWebhook.to(webhookUrl.get())
+            .title(title)
+            .description(String.format("%s\n\n**Player:** %s\n**Position:** %s\n**Pickaxe:** %s\n**Time:** %s",
+                description, playerName, position, pickaxeType.get().toString(), timestamp))
+            .color(16711680)
+            .footer("TunnelBaseFinder v3.0 Enhanced")
+            .image(imageFile.toPath())
+            .onError(message -> {
+                webhookStatus = "Last sent: Error - " + message;
+                if (notifications.get()) error("Failed to send webhook: " + message);
+            })
+            .send()
+            .thenAccept(ok -> webhookStatus = ok ? "Last sent: Success" : "Last sent: Failed");
     }
 
     private String escapeJson(String input) {
@@ -3000,21 +2909,14 @@ public class PremiumTunnelBaseFinder extends Module {
                     "• Adaptive Smoothing: " + (adaptiveSmoothing.get() ? "Enabled" : "Disabled") + "\n" +
                     "• Player Detection: " + (enablePlayerDetection.get() ? "Enabled" : "Disabled"));
 
-            // Reset the setting after triggering
-            CompletableFuture.runAsync(() -> {
-                try {
-                    Thread.sleep(1000);
-                    testWebhook.set(false);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            });
+            // flip the toggle back off
+            GlazedScheduler.scheduleSeconds(() -> testWebhook.set(false), 1);
         }
     }
 
     @EventHandler
     private void onRender3D(Render3DEvent event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
 
         // render the block we're targeting
         if (renderTargetBlock.get() && currentTarget != null) {
@@ -3028,17 +2930,17 @@ public class PremiumTunnelBaseFinder extends Module {
 
         // render the tunnel path
         if (renderPath.get() && startPos != null) {
-            BlockPos currentPos = mc.player.getBlockPos();
+            BlockPos currentPos = mc.player.blockPosition();
             int pathLength = infiniteTunnel.get() ? 20 : Math.min(20, tunnelLength.get() - blocksMined);
 
             for (int i = 1; i <= pathLength; i++) {
-                BlockPos pathBlock = currentPos.offset(currentDirection, i);
+                BlockPos pathBlock = currentPos.relative(currentDirection, i);
 
                 if (pickaxeType.get() == PickaxeType.AMETHYST) {
                     // for amethyst pickaxe, show the 3x3 area
                     for (int x = -1; x <= 1; x++) {
                         for (int y = 0; y <= 2; y++) {
-                            BlockPos renderPos = pathBlock.add(
+                            BlockPos renderPos = pathBlock.offset(
                                 currentDirection == Direction.NORTH || currentDirection == Direction.SOUTH ? x : 0,
                                 y,
                                 currentDirection == Direction.EAST || currentDirection == Direction.WEST ? x : 0
@@ -3049,14 +2951,14 @@ public class PremiumTunnelBaseFinder extends Module {
                 } else {
                     // for normal pickaxe, show the 2x2 tunnel
                     event.renderer.box(pathBlock, pathColor.get(), pathColor.get(), ShapeMode.Lines, 0);
-                    event.renderer.box(pathBlock.up(), pathColor.get(), pathColor.get(), ShapeMode.Lines, 0);
+                    event.renderer.box(pathBlock.above(), pathColor.get(), pathColor.get(), ShapeMode.Lines, 0);
                 }
             }
         }
 
         // render the y level line
         if (renderYLevel.get() && maintainYLevel.get()) {
-            BlockPos playerPos = mc.player.getBlockPos();
+            BlockPos playerPos = mc.player.blockPosition();
             // render a horizontal line at the start y level
             for (int x = -10; x <= 10; x++) {
                 for (int z = -10; z <= 10; z++) {
@@ -3072,7 +2974,7 @@ public class PremiumTunnelBaseFinder extends Module {
     private void renderLavaDetectionArea(Render3DEvent event) {
         if (mc.player == null) return;
 
-        BlockPos playerPos = mc.player.getBlockPos();
+        BlockPos playerPos = mc.player.blockPosition();
         int scanRange = lavaDetectionRange.get();
         int scanWidth = lavaDetectionWidth.get();
         int scanHeight = lavaDetectionHeight.get();
@@ -3099,14 +3001,14 @@ public class PremiumTunnelBaseFinder extends Module {
 
     @Override
     public String getInfoString() {
-        String pickaxeInfo = pickaxeType.get() == PickaxeType.AMETHYST ? "ᴀᴍᴇᴛʜʏѕᴛ" : "Normal";
+        String pickaxeInfo = pickaxeType.get() == PickaxeType.AMETHYST ? "á´€á´á´‡á´›ÊœÊÑ•á´›" : "Normal";
         String statusInfo = "";
 
         if (isPearlThroughActive) {
             statusInfo = " | 🌟 Pearl-Through (" + (pearlThroughCooldownTicks / 20) + "s)";
         } else if (playerDetected) {
             if (isMovingAway) {
-                statusInfo = " | 🏃‍♂️ Moving Away (" + moveAwaySteps + "/" + moveAwayDistance.get() + ")";
+                statusInfo = " | 🏃 Moving Away (" + moveAwaySteps + "/" + moveAwayDistance.get() + ")";
             } else {
                 statusInfo = " | 🚨 PLAYER DETECTED!";
             }
@@ -3115,13 +3017,13 @@ public class PremiumTunnelBaseFinder extends Module {
         } else if (isBreakingBlockingStones) {
             statusInfo = " | 🔨 Breaking Stones";
         } else if (isBackingUp) {
-            statusInfo = " | ⬅️ Enhanced Backup";
+            statusInfo = " | â¬…ï¸ Enhanced Backup";
         } else if (isAvoiding) {
             statusInfo = " | 🔄 Avoiding " + dangerType;
         } else if (isSmoothLooking) {
-            statusInfo = " | 👁 Smooth Look";
+            statusInfo = " | ðŸ‘ Smooth Look";
         } else if (emptyAreaDetected && enablePearlThrough.get()) {
-            statusInfo = " | 🕳️ Empty Area (M-Click)";
+            statusInfo = " | 🕳ï¸ Empty Area (M-Click)";
         }
 
         String enhancedFeatures = "";

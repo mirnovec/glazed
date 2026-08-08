@@ -5,13 +5,12 @@ import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.screen.GenericContainerScreenHandler;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.slot.SlotActionType;
-
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.ChestMenu;
+import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import java.util.List;
 
 public class AutoSell extends Module {
@@ -68,7 +67,7 @@ public class AutoSell extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.interactionManager == null) return;
+        if (mc.player == null || mc.gameMode == null) return;
 
         if (delayCounter > 0) {
             delayCounter--;
@@ -76,7 +75,7 @@ public class AutoSell extends Module {
         }
 
         if (shouldReopen) {
-            mc.getNetworkHandler().sendChatCommand("sell");
+            mc.getConnection().sendCommand("sell");
             shouldReopen = false;
             delayCounter = delay.get();
             return;
@@ -86,17 +85,17 @@ public class AutoSell extends Module {
     }
 
     private void handleSellMode() {
-        ScreenHandler currentScreenHandler = mc.player.currentScreenHandler;
+        AbstractContainerMenu currentScreenHandler = mc.player.containerMenu;
 
-        if (!(currentScreenHandler instanceof GenericContainerScreenHandler)) {
-            mc.getNetworkHandler().sendChatCommand("sell");
+        if (!(currentScreenHandler instanceof ChestMenu)) {
+            mc.getConnection().sendCommand("sell");
             delayCounter = 20;
             return;
         }
 
         if (areAllSellSlotsOccupied(currentScreenHandler)) {
             if (notifications.get()) info("All sell menu slots (0-35) are occupied. Closing and reopening menu.");
-            mc.player.closeHandledScreen();
+            mc.player.closeContainer();
             shouldReopen = true;
             delayCounter = delay.get();
             return;
@@ -106,7 +105,7 @@ public class AutoSell extends Module {
         boolean foundItemToSell = false;
 
         for (int slot = 36; slot < totalSlots; slot++) {
-            ItemStack stack = currentScreenHandler.getSlot(slot).getStack();
+            ItemStack stack = currentScreenHandler.getSlot(slot).getItem();
 
             if (stack.isEmpty()) continue;
 
@@ -114,26 +113,26 @@ public class AutoSell extends Module {
             if (!shouldSellItem(itemInSlot)) continue;
 
             foundItemToSell = true;
-            mc.interactionManager.clickSlot(currentScreenHandler.syncId, slot, 0, SlotActionType.QUICK_MOVE, mc.player);
+            mc.gameMode.handleContainerInput(currentScreenHandler.containerId, slot, 0, ContainerInput.QUICK_MOVE, mc.player);
             delayCounter = delay.get();
             return;
         }
 
         if (!foundItemToSell) {
             if (notifications.get()) info("All items sold. Closing GUI.");
-            mc.player.closeHandledScreen();
+            mc.player.closeContainer();
             toggle();
             delayCounter = 40;
         }
     }
 
-    private boolean areAllSellSlotsOccupied(ScreenHandler screenHandler) {
+    private boolean areAllSellSlotsOccupied(AbstractContainerMenu screenHandler) {
         for (int slot = 0; slot <= 35; slot++) {
             if (slot >= screenHandler.slots.size()) {
-                return false; // If we don't have enough slots, they can't all be occupied
+                return false;
             }
 
-            ItemStack stack = screenHandler.getSlot(slot).getStack();
+            ItemStack stack = screenHandler.getSlot(slot).getItem();
             if (stack.isEmpty()) {
                 return false;
             }

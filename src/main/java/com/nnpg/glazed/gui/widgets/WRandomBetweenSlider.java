@@ -5,7 +5,8 @@ import meteordevelopment.meteorclient.gui.themes.meteor.MeteorGuiTheme;
 import meteordevelopment.meteorclient.gui.themes.meteor.MeteorWidget;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import meteordevelopment.meteorclient.utils.render.color.Color;
-import net.minecraft.util.math.MathHelper;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.util.Mth;
 
 public class WRandomBetweenSlider extends WWidget implements MeteorWidget {
     public Runnable action;
@@ -23,8 +24,8 @@ public class WRandomBetweenSlider extends WWidget implements MeteorWidget {
     private double valueMaxAtDragStart;
 
     public WRandomBetweenSlider(double valueMin, double valueMax, double min, double max, int decimalPlaces) {
-        this.valueMin = MathHelper.clamp(valueMin, min, max);
-        this.valueMax = MathHelper.clamp(valueMax, min, max);
+        this.valueMin = Mth.clamp(valueMin, min, max);
+        this.valueMax = Mth.clamp(valueMax, min, max);
         this.min = min;
         this.max = max;
         this.decimalPlaces = decimalPlaces;
@@ -77,8 +78,10 @@ public class WRandomBetweenSlider extends WWidget implements MeteorWidget {
     }
 
     @Override
-    public boolean onMouseClicked(double mouseX, double mouseY, int button, boolean used) {
-        if (mouseOver && !used) {
+    public boolean onMouseClicked(MouseButtonEvent click, boolean doubled) {
+        double mouseX = click.x();
+        int button = click.button();
+        if (mouseOver) {
             valueMinAtDragStart = valueMin;
             valueMaxAtDragStart = valueMax;
 
@@ -128,7 +131,7 @@ public class WRandomBetweenSlider extends WWidget implements MeteorWidget {
         if (draggingMin || draggingMax) {
             if (mouseOverX) {
                 double valueWidth = mouseX - (x + handleSize / 2);
-                valueWidth = MathHelper.clamp(valueWidth, 0, width - handleSize);
+                valueWidth = Mth.clamp(valueWidth, 0, width - handleSize);
                 double newValue = (valueWidth / (width - handleSize)) * (max - min) + min;
 
                 if (draggingMin) {
@@ -142,7 +145,7 @@ public class WRandomBetweenSlider extends WWidget implements MeteorWidget {
     }
 
     @Override
-    public boolean onMouseReleased(double mouseX, double mouseY, int button) {
+    public boolean onMouseReleased(MouseButtonEvent click) {
         if (draggingMin || draggingMax) {
             if ((valueMin != valueMinAtDragStart || valueMax != valueMaxAtDragStart) && actionOnRelease != null) {
                 actionOnRelease.run();

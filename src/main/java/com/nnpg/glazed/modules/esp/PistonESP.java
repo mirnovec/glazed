@@ -11,14 +11,13 @@ import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.chunk.Chunk;
-import net.minecraft.world.chunk.WorldChunk;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.phys.Vec3;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -31,13 +30,13 @@ public class PistonESP extends Module {
     private final Setting<SettingColor> pistonColor = sgGeneral.add(new ColorSetting.Builder()
         .name("piston-color")
         .description("Regular piston box color")
-        .defaultValue(new SettingColor(255, 100, 100, 100)) // Red color for pistons
+        .defaultValue(new SettingColor(255, 100, 100, 100))
         .build());
 
     private final Setting<SettingColor> stickyPistonColor = sgGeneral.add(new ColorSetting.Builder()
         .name("sticky-piston-color")
         .description("Sticky piston box color")
-        .defaultValue(new SettingColor(100, 255, 100, 100)) // Green color for sticky pistons
+        .defaultValue(new SettingColor(100, 255, 100, 100))
         .build());
 
     private final Setting<ShapeMode> pistonShapeMode = sgGeneral.add(new EnumSetting.Builder<ShapeMode>()
@@ -130,12 +129,10 @@ public class PistonESP extends Module {
         .visible(useThreading::get)
         .build());
 
-    // Thread-safe collections
     private final Set<BlockPos> regularPistonPositions = ConcurrentHashMap.newKeySet();
     private final Set<BlockPos> stickyPistonPositions = ConcurrentHashMap.newKeySet();
     private final Set<BlockPos> pistonHeadPositions = ConcurrentHashMap.newKeySet();
 
-    // Threading
     private ExecutorService threadPool;
 
     public PistonESP() {
@@ -144,9 +141,8 @@ public class PistonESP extends Module {
 
     @Override
     public void onActivate() {
-        if (mc.world == null) return;
+        if (mc.level == null) return;
 
-        // Initialize thread pool
         if (useThreading.get()) {
             threadPool = Executors.newFixedThreadPool(threadPoolSize.get());
         }
@@ -156,23 +152,20 @@ public class PistonESP extends Module {
         pistonHeadPositions.clear();
 
         if (useThreading.get()) {
-            // Scan chunks asynchronously
-            for (Chunk chunk : Utils.chunks()) {
-                if (chunk instanceof WorldChunk worldChunk) {
+            for (ChunkAccess chunk : Utils.chunks()) {
+                if (chunk instanceof LevelChunk worldChunk) {
                     threadPool.submit(() -> scanChunkForPistons(worldChunk));
                 }
             }
         } else {
-            // Scan chunks synchronously
-            for (Chunk chunk : Utils.chunks()) {
-                if (chunk instanceof WorldChunk worldChunk) scanChunkForPistons(worldChunk);
+            for (ChunkAccess chunk : Utils.chunks()) {
+                if (chunk instanceof LevelChunk worldChunk) scanChunkForPistons(worldChunk);
             }
         }
     }
 
     @Override
     public void onDeactivate() {
-        // Shutdown thread pool
         if (threadPool != null && !threadPool.isShutdown()) {
             threadPool.shutdown();
             threadPool = null;
@@ -197,11 +190,9 @@ public class PistonESP extends Module {
         BlockPos pos = event.pos;
         BlockState state = event.newState;
 
-        // Create a task for block update processing
         Runnable updateTask = () -> {
             PistonType pistonType = getPistonType(state, pos.getY());
 
-            // Remove from all collections first
             regularPistonPositions.remove(pos);
             stickyPistonPositions.remove(pos);
             pistonHeadPositions.remove(pos);
@@ -238,12 +229,12 @@ public class PistonESP extends Module {
         }
     }
 
-    private void scanChunkForPistons(WorldChunk chunk) {
+    private void scanChunkForPistons(LevelChunk chunk) {
         ChunkPos cpos = chunk.getPos();
-        int xStart = cpos.getStartX();
-        int zStart = cpos.getStartZ();
-        int yMin = Math.max(chunk.getBottomY(), minY.get());
-        int yMax = Math.min(chunk.getBottomY() + chunk.getHeight(), maxY.get());
+        int xStart = cpos.getMinBlockX();
+        int zStart = cpos.getMinBlockZ();
+        int yMin = Math.max(chunk.getMinY(), minY.get());
+        int yMax = Math.min(chunk.getMinY() + chunk.getHeight(), maxY.get());
 
         Set<BlockPos> chunkRegularPistons = new HashSet<>();
         Set<BlockPos> chunkStickyPistons = new HashSet<>();
@@ -275,21 +266,19 @@ public class PistonESP extends Module {
             }
         }
 
-        // Remove old piston positions from this chunk
         regularPistonPositions.removeIf(pos -> {
-            ChunkPos blockChunk = new ChunkPos(pos);
+            ChunkPos blockChunk = new ChunkPos(pos.getX() >> 4, pos.getZ() >> 4);
             return blockChunk.equals(cpos) && !chunkRegularPistons.contains(pos);
         });
         stickyPistonPositions.removeIf(pos -> {
-            ChunkPos blockChunk = new ChunkPos(pos);
+            ChunkPos blockChunk = new ChunkPos(pos.getX() >> 4, pos.getZ() >> 4);
             return blockChunk.equals(cpos) && !chunkStickyPistons.contains(pos);
         });
         pistonHeadPositions.removeIf(pos -> {
-            ChunkPos blockChunk = new ChunkPos(pos);
+            ChunkPos blockChunk = new ChunkPos(pos.getX() >> 4, pos.getZ() >> 4);
             return blockChunk.equals(cpos) && !chunkPistonHeads.contains(pos);
         });
 
-        // Add new piston positions
         int newBlocks = 0;
         for (BlockPos pos : chunkRegularPistons) {
             if (regularPistonPositions.add(pos)) {
@@ -307,14 +296,12 @@ public class PistonESP extends Module {
             }
         }
 
-        // Provide chunk-level feedback to reduce spam
         if (pistonChat.get() && foundCount > 0) {
             if (useThreading.get() && limitChatSpam.get()) {
                 if (newBlocks > 0) {
-                    info("§c[§6Piston ESP§c] §6Chunk " + cpos.x + "," + cpos.z + "§c: §6" + newBlocks + " new pistons found");
+                    info("§c[§6Piston ESP§c] §6Chunk " + cpos.x() + "," + cpos.z() + "§c: §6" + newBlocks + " new pistons found");
                 }
             } else {
-                // Individual block notifications for non-threaded mode
                 for (BlockPos pos : chunkRegularPistons) {
                     if (!regularPistonPositions.contains(pos)) {
                         info("§c[§6Piston ESP§c] §6Regular Piston at " + pos.toShortString());
@@ -344,15 +331,15 @@ public class PistonESP extends Module {
     private PistonType getPistonType(BlockState state, int y) {
         if (y < minY.get() || y > maxY.get()) return PistonType.NONE;
 
-        if (includeRegularPistons.get() && state.isOf(Blocks.PISTON)) {
+        if (includeRegularPistons.get() && state.is(Blocks.PISTON)) {
             return PistonType.REGULAR_PISTON;
         }
 
-        if (includeStickyPistons.get() && state.isOf(Blocks.STICKY_PISTON)) {
+        if (includeStickyPistons.get() && state.is(Blocks.STICKY_PISTON)) {
             return PistonType.STICKY_PISTON;
         }
 
-        if (includeExtendedPistons.get() && state.isOf(Blocks.PISTON_HEAD)) {
+        if (includeExtendedPistons.get() && state.is(Blocks.PISTON_HEAD)) {
             return PistonType.PISTON_HEAD;
         }
 
@@ -363,46 +350,35 @@ public class PistonESP extends Module {
     private void onRender(Render3DEvent event) {
         if (mc.player == null) return;
 
-        // Use interpolated position for smooth movement
-        Vec3d playerPos = mc.player.getLerpedPos(event.tickDelta);
+        Vec3 playerPos = mc.player.getPosition(event.tickDelta);
         Color regularPistonSide = new Color(pistonColor.get());
         Color regularPistonOutline = new Color(pistonColor.get());
         Color stickyPistonSide = new Color(stickyPistonColor.get());
         Color stickyPistonOutline = new Color(stickyPistonColor.get());
         Color tracerColorValue = new Color(tracerColor.get());
 
-        // Get render distance
-        int renderDistance = mc.options.getViewDistance().getValue() * 16;
+        int renderDistance = mc.options.renderDistance().get() * 16;
 
-        // Render regular pistons
         for (BlockPos pos : regularPistonPositions) {
-            // Check if within render distance - this applies to both ESP box and tracers
             if (!isWithinRenderDistance(playerPos, pos, renderDistance)) continue;
 
-            // Render ESP box
             event.renderer.box(pos, regularPistonSide, regularPistonOutline, pistonShapeMode.get(), 0);
 
-            // Render tracer if enabled
             if (tracers.get()) {
                 renderTracer(event, playerPos, pos, tracerColorValue);
             }
         }
 
-        // Render sticky pistons
         for (BlockPos pos : stickyPistonPositions) {
-            // Check if within render distance - this applies to both ESP box and tracers
             if (!isWithinRenderDistance(playerPos, pos, renderDistance)) continue;
 
-            // Render ESP box
             event.renderer.box(pos, stickyPistonSide, stickyPistonOutline, pistonShapeMode.get(), 0);
 
-            // Render tracer if enabled
             if (tracers.get()) {
                 renderTracer(event, playerPos, pos, tracerColorValue);
             }
         }
 
-        // Render piston heads with a mix of both colors
         Color pistonHeadSide = new Color((pistonColor.get().r + stickyPistonColor.get().r) / 2,
             (pistonColor.get().g + stickyPistonColor.get().g) / 2,
             (pistonColor.get().b + stickyPistonColor.get().b) / 2,
@@ -410,42 +386,37 @@ public class PistonESP extends Module {
         Color pistonHeadOutline = new Color(pistonHeadSide);
 
         for (BlockPos pos : pistonHeadPositions) {
-            // Check if within render distance - this applies to both ESP box and tracers
             if (!isWithinRenderDistance(playerPos, pos, renderDistance)) continue;
 
-            // Render ESP box
             event.renderer.box(pos, pistonHeadSide, pistonHeadOutline, pistonShapeMode.get(), 0);
 
-            // Render tracer if enabled
             if (tracers.get()) {
                 renderTracer(event, playerPos, pos, tracerColorValue);
             }
         }
     }
 
-    private boolean isWithinRenderDistance(Vec3d playerPos, BlockPos blockPos, int renderDistance) {
+    private boolean isWithinRenderDistance(Vec3 playerPos, BlockPos blockPos, int renderDistance) {
         double dx = playerPos.x - blockPos.getX() - 0.5;
         double dz = playerPos.z - blockPos.getZ() - 0.5;
         double horizontalDistance = Math.sqrt(dx * dx + dz * dz);
         return horizontalDistance <= renderDistance;
     }
 
-    private void renderTracer(Render3DEvent event, Vec3d playerPos, BlockPos pos, Color tracerColorValue) {
-        Vec3d blockCenter = Vec3d.ofCenter(pos);
+    private void renderTracer(Render3DEvent event, Vec3 playerPos, BlockPos pos, Color tracerColorValue) {
+        Vec3 blockCenter = Vec3.atCenterOf(pos);
 
-        // Start tracer from slightly in front of camera to make it visible in first person
-        Vec3d startPos;
-        if (mc.options.getPerspective().isFirstPerson()) {
-            // First person: start tracer slightly forward from camera
-            Vec3d lookDirection = mc.player.getRotationVector();
-            startPos = new Vec3d(
+        Vec3 startPos;
+        // push it half a block forward or first person clips the whole line
+        if (mc.options.getCameraType().isFirstPerson()) {
+            Vec3 lookDirection = mc.player.getLookAngle();
+            startPos = new Vec3(
                 playerPos.x + lookDirection.x * 0.5,
                 playerPos.y + mc.player.getEyeHeight(mc.player.getPose()) + lookDirection.y * 0.5,
                 playerPos.z + lookDirection.z * 0.5
             );
         } else {
-            // Third person: use normal eye position
-            startPos = new Vec3d(
+            startPos = new Vec3(
                 playerPos.x,
                 playerPos.y + mc.player.getEyeHeight(mc.player.getPose()),
                 playerPos.z

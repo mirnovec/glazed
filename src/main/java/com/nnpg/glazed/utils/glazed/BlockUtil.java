@@ -1,66 +1,68 @@
 package com.nnpg.glazed.utils.glazed;
 
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.RespawnAnchorBlock;
-import net.minecraft.state.property.Property;
-import net.minecraft.util.ActionResult;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.world.chunk.WorldChunk;
-
 import java.util.Objects;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.RespawnAnchorBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.EmptyLevelChunk;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.phys.BlockHitResult;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
 
 public final class BlockUtil {
-    public static Stream<WorldChunk> getLoadedChunks() {
-        int radius = Math.max(2, mc.options.getClampedViewDistance()) + 3;
-        int diameter = radius * 2 + 1;
+    public static Stream<LevelChunk> getLoadedChunks() {
+        if (mc.level == null || mc.player == null) return Stream.empty();
 
-        ChunkPos center = mc.player.getChunkPos();
-        ChunkPos min = new ChunkPos(center.x - radius, center.z - radius);
-        ChunkPos max = new ChunkPos(center.x + radius, center.z + radius);
+        int radius = Math.max(2, mc.options.getEffectiveRenderDistance());
+        ChunkPos center = mc.player.chunkPosition();
 
-        return Stream.iterate(min, pos -> {
-                int x = pos.x;
-                int z = pos.z;
-                x++;
-                if (x > max.x) {
-                    x = min.x;
-                    z++;
-                }
-                if (z > max.z)
-                    throw new IllegalStateException("Stream limit didn't work.");
-
-                return new ChunkPos(x, z);
-
-            }).limit((long) diameter * diameter)
-            .filter(c -> mc.world.isChunkLoaded(c.x, c.z))
-            .map(c -> mc.world.getChunk(c.x, c.z)).filter(Objects::nonNull);
+        // this was a Stream.iterate with a throw in it if the limit was off by one
+        // wtf was that. normal loop
+        return IntStream.rangeClosed(center.x() - radius, center.x() + radius)
+            .boxed()
+            .flatMap(x -> IntStream.rangeClosed(center.z() - radius, center.z() + radius)
+                .filter(z -> mc.level.hasChunk(x, z))
+                .mapToObj(z -> mc.level.getChunk(x, z)))
+            .filter(Objects::nonNull)
+            // isChunkLoaded still gives you EmptyChunks and those read as pure air
+            .filter(chunk -> !(chunk instanceof EmptyLevelChunk));
     }
 
     public static boolean isBlockAtPosition(final BlockPos blockPos, final Block block) {
-        return mc.world.getBlockState(blockPos).getBlock() == block;
+        return mc.level != null && mc.level.getBlockState(blockPos).getBlock() == block;
     }
 
     public static boolean isRespawnAnchorCharged(final BlockPos blockPos) {
-        return isBlockAtPosition(blockPos, Blocks.RESPAWN_ANCHOR) &&
-            (int) mc.world.getBlockState(blockPos).get((Property) RespawnAnchorBlock.CHARGES) != 0;
+        return getRespawnAnchorCharges(blockPos) > 0;
     }
 
     public static boolean isRespawnAnchorUncharged(final BlockPos blockPos) {
-        return isBlockAtPosition(blockPos, Blocks.RESPAWN_ANCHOR) &&
-            (int) mc.world.getBlockState(blockPos).get((Property) RespawnAnchorBlock.CHARGES) == 0;
+        return getRespawnAnchorCharges(blockPos) == 0;
+    }
+
+    private static int getRespawnAnchorCharges(final BlockPos blockPos) {
+        if (mc.level == null) return -1;
+
+        BlockState state = mc.level.getBlockState(blockPos);
+        if (state.getBlock() != Blocks.RESPAWN_ANCHOR) return -1;
+
+        return state.getValue(RespawnAnchorBlock.CHARGE);
     }
 
     public static void interactWithBlock(final BlockHitResult blockHitResult, final boolean shouldSwingHand) {
-        final ActionResult result = mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, blockHitResult);
-        if (result.isAccepted() && shouldSwingHand) {
-            mc.player.swingHand(Hand.MAIN_HAND);
+        if (mc.gameMode == null || mc.player == null) return;
+
+        final InteractionResult result = mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, blockHitResult);
+        if (result.consumesAction() && shouldSwingHand) {
+            mc.player.swing(InteractionHand.MAIN_HAND);
         }
     }
 }

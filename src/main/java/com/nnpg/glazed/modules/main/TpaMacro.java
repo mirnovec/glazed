@@ -1,20 +1,15 @@
 package com.nnpg.glazed.modules.main;
-//imports
 import com.nnpg.glazed.GlazedAddon;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.gui.screen.ingame.HandledScreen;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.screen.slot.SlotActionType;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.world.item.ItemStack;
 import java.util.Objects;
-
-
-
-
 
 public class TpaMacro extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -80,11 +75,10 @@ public class TpaMacro extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.world == null || mc.interactionManager == null) return;
+        if (mc.player == null || mc.level == null || mc.gameMode == null) return;
 
-        // If the player is nearby, disable
-        PlayerEntity target = mc.world.getPlayers().stream()
-            .filter(p -> Objects.equals(p.getGameProfile().getName(), playerName.get()))
+        Player target = mc.level.players().stream()
+            .filter(p -> Objects.equals(p.getGameProfile().name(), playerName.get()))
             .findFirst()
             .orElse(null);
 
@@ -94,20 +88,17 @@ public class TpaMacro extends Module {
             return;
         }
 
-        // If we're in GUI and waiting for confirm, try clicking
-        if (waitingForConfirm && mc.currentScreen instanceof HandledScreen<?>) {
+        if (waitingForConfirm && mc.screen instanceof AbstractContainerScreen<?>) {
             clickConfirmButtonIfPresent();
             return;
         }
 
-        // Timeout if GUI didn't show up
         if (waitingForConfirm && guiWaitStart > 0 && System.currentTimeMillis() - guiWaitStart > GUI_TIMEOUT_MS) {
             if (notifications.get()) ChatUtils.warning("GUI timeout. Retrying...");
             waitingForConfirm = false;
             guiWaitStart = 0;
         }
 
-        // Send TPA command if not waiting
         if (!waitingForConfirm) {
             tickCounter++;
             if (tickCounter >= delay.get()) {
@@ -122,18 +113,18 @@ public class TpaMacro extends Module {
     }
 
     private void clickConfirmButtonIfPresent() {
-        if (!(mc.currentScreen instanceof HandledScreen<?> screen)) return;
+        if (!(mc.screen instanceof AbstractContainerScreen<?> screen)) return;
 
-        var handler = screen.getScreenHandler();
+        var handler = screen.getMenu();
 
         for (int i = 0; i < handler.slots.size(); i++) {
-            ItemStack stack = handler.getSlot(i).getStack();
-            String key = stack.getItem().getTranslationKey().toLowerCase();
+            ItemStack stack = handler.getSlot(i).getItem();
+            String key = stack.getItem().getDescriptionId().toLowerCase();
 
             if (key.contains("stained_glass_pane") && key.contains("lime")) {
-                mc.interactionManager.clickSlot(handler.syncId, i, 0, SlotActionType.PICKUP, mc.player);
+                mc.gameMode.handleContainerInput(handler.containerId, i, 0, ContainerInput.PICKUP, mc.player);
                 if (notifications.get()) ChatUtils.info("🟢 Confirm button clicked (slot " + i + ").");
-                mc.player.closeHandledScreen();
+                mc.player.closeContainer();
                 waitingForConfirm = false;
                 guiWaitStart = 0;
                 return;

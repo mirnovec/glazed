@@ -1,5 +1,6 @@
 package com.nnpg.glazed.modules.esp;
 
+import com.nnpg.glazed.utils.GlazedWebhook;
 import com.nnpg.glazed.GlazedAddon;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.ChunkDataEvent;
@@ -10,22 +11,13 @@ import meteordevelopment.meteorclient.utils.render.MeteorToast;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.Block;
-import net.minecraft.item.ItemStack;
-import net.minecraft.network.packet.s2c.common.DisconnectS2CPacket;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.util.math.Vec3d;
-
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.common.ClientboundDisconnectPacket;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.phys.Vec3;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
 
 public class BlockNotifier extends Module {
     private final SettingGroup sg_general = settings.getDefaultGroup();
@@ -148,9 +140,6 @@ public class BlockNotifier extends Module {
     private final Set<BlockPos> found_block_positions = new HashSet<>();
     private final Set<BlockPos> new_found_blocks = new HashSet<>();
     private final Map<BlockPos, Block> block_type_map = new HashMap<>();
-    private final HttpClient http_client = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .build();
 
     private int total_blocks_found = 0;
 
@@ -175,7 +164,7 @@ public class BlockNotifier extends Module {
 
     @EventHandler
     private void on_chunk_data(ChunkDataEvent event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
 
         ChunkPos chunk_pos = event.chunk().getPos();
         if (processed_chunks.contains(chunk_pos)) return;
@@ -186,9 +175,9 @@ public class BlockNotifier extends Module {
 
         for (int x = 0; x < 16; x++) {
             for (int z = 0; z < 16; z++) {
-                for (int y = mc.world.getBottomY(); y < mc.world.getHeight(); y++) {
-                    BlockPos pos = new BlockPos(chunk_pos.getStartX() + x, y, chunk_pos.getStartZ() + z);
-                    Block block = mc.world.getBlockState(pos).getBlock();
+                for (int y = mc.level.getMinY(); y < mc.level.getHeight(); y++) {
+                    BlockPos pos = new BlockPos(chunk_pos.getMinBlockX() + x, y, chunk_pos.getMinBlockZ() + z);
+                    Block block = mc.level.getBlockState(pos).getBlock();
 
                     if (blocks_to_find.get().contains(block)) {
                         found_blocks.put(block, found_blocks.getOrDefault(block, 0) + 1);
@@ -217,7 +206,7 @@ public class BlockNotifier extends Module {
     private void onRender(Render3DEvent event) {
         if (mc.player == null || (!show_esp.get() && !show_tracers.get())) return;
 
-        Vec3d playerPos = mc.player.getLerpedPos(event.tickDelta);
+        Vec3 playerPos = mc.player.getPosition(event.tickDelta);
         Color sideColor = new Color(esp_color.get());
         Color lineColor = new Color(esp_color.get());
         Color tracerColorValue = new Color(tracer_color.get());
@@ -230,7 +219,7 @@ public class BlockNotifier extends Module {
             }
 
             if (maxDistance > 0) {
-                double distance = playerPos.distanceTo(Vec3d.ofCenter(pos));
+                double distance = playerPos.distanceTo(Vec3.atCenterOf(pos));
                 if (distance > maxDistance) {
                     continue;
                 }
@@ -241,18 +230,18 @@ public class BlockNotifier extends Module {
             }
 
             if (show_tracers.get()) {
-                Vec3d blockCenter = Vec3d.ofCenter(pos);
+                Vec3 blockCenter = Vec3.atCenterOf(pos);
 
-                Vec3d startPos;
-                if (mc.options.getPerspective().isFirstPerson()) {
-                    Vec3d lookDirection = mc.player.getRotationVector();
-                    startPos = new Vec3d(
+                Vec3 startPos;
+                if (mc.options.getCameraType().isFirstPerson()) {
+                    Vec3 lookDirection = mc.player.getLookAngle();
+                    startPos = new Vec3(
                         playerPos.x + lookDirection.x * 0.5,
                         playerPos.y + mc.player.getEyeHeight(mc.player.getPose()) + lookDirection.y * 0.5,
                         playerPos.z + lookDirection.z * 0.5
                     );
                 } else {
-                    startPos = new Vec3d(
+                    startPos = new Vec3(
                         playerPos.x,
                         playerPos.y + mc.player.getEyeHeight(mc.player.getPose()),
                         playerPos.z
@@ -321,8 +310,8 @@ public class BlockNotifier extends Module {
             msg.append(String.format(" (%d total)", total));
         }
 
-        int center_x = chunk_pos.x * 16 + 8;
-        int center_z = chunk_pos.z * 16 + 8;
+        int center_x = chunk_pos.x() * 16 + 8;
+        int center_z = chunk_pos.z() * 16 + 8;
         msg.append(" at chunk ").append(center_x).append(", ").append(center_z);
 
         return msg.toString();
@@ -340,107 +329,65 @@ public class BlockNotifier extends Module {
     private void show_toast_notification(String message, Map<Block, Integer> found_blocks) {
         try {
             Block first_block = found_blocks.keySet().iterator().next();
-            MeteorToast toast = new MeteorToast(new ItemStack(first_block.asItem()).getItem(), title, message);
-            mc.getToastManager().add(toast);
+            MeteorToast toast = new MeteorToast.Builder(title).text(message).icon(first_block.asItem()).build();
+            mc.getToastManager().addToast(toast);
         } catch (Exception e) {
             if (notifications.get()) info(message);
         }
     }
 
     private void send_webhook_notification(ChunkPos chunk_pos, Map<Block, Integer> found_blocks, String detection_reason) {
-        String url = webhook_url.get().trim();
-        if (url.isEmpty()) {
+        if (webhook_url.get().trim().isEmpty()) {
             if (notifications.get()) warning("Webhook URL not configured!");
             return;
         }
 
-        CompletableFuture.runAsync(() -> {
-            try {
-                String server_info = mc.getCurrentServerEntry() != null ?
-                    mc.getCurrentServerEntry().address : "Unknown Server";
+        String server_info = mc.getCurrentServer() != null ?
+            mc.getCurrentServer().ip : "Unknown Server";
 
-                String message_content = "";
-                if (self_ping.get() && !discord_id.get().trim().isEmpty()) {
-                    message_content = String.format("<@%s>", discord_id.get().trim());
-                }
+        int center_x = chunk_pos.x() * 16 + 8;
+        int center_z = chunk_pos.z() * 16 + 8;
 
-                int center_x = chunk_pos.x * 16 + 8;
-                int center_z = chunk_pos.z * 16 + 8;
+        StringBuilder items_breakdown = new StringBuilder();
+        int total_items = 0;
 
-                StringBuilder items_breakdown = new StringBuilder();
-                int total_items = 0;
+        for (Map.Entry<Block, Integer> entry : found_blocks.entrySet()) {
+            String block_name = entry.getKey().getName().getString();
+            int count = entry.getValue();
+            items_breakdown.append(String.format("• %s: x%d\n", block_name, count));
+            total_items += count;
+        }
 
-                for (Map.Entry<Block, Integer> entry : found_blocks.entrySet()) {
-                    String block_name = entry.getKey().getName().getString();
-                    int count = entry.getValue();
-                    items_breakdown.append(String.format("• %s: x%d\\n", block_name, count));
-                    total_items += count;
-                }
-
-                String description = String.format("Target blocks detected in chunk at %d, %d!", center_x, center_z);
-
-                String json_payload = String.format(
-                    "{\"content\":\"%s\"," +
-                        "\"username\":\"Block Notifier\"," +
-                        "\"avatar_url\":\"https://i.imgur.com/OL2y1cr.png\"," +
-                        "\"embeds\":[{" +
-                        "\"title\":\"🎯 Block Notifier Alert\"," +
-                        "\"description\":\"%s\"," +
-                        "\"color\":%d," +
-                        "\"fields\":[" +
-                        "{\"name\":\"Detection Reason\",\"value\":\"%s\",\"inline\":false}," +
-                        "{\"name\":\"Total Items Found\",\"value\":\"%d\",\"inline\":false}," +
-                        "{\"name\":\"Items Breakdown\",\"value\":\"%s\",\"inline\":false}," +
-                        "{\"name\":\"Coordinates\",\"value\":\"%d, %d\",\"inline\":true}," +
-                        "{\"name\":\"Server\",\"value\":\"%s\",\"inline\":true}," +
-                        "{\"name\":\"Time\",\"value\":\"<t:%d:R>\",\"inline\":true}" +
-                        "]," +
-                        "\"footer\":{\"text\":\"Block Notifier\"}" +
-                        "}]}",
-                    message_content.replace("\"", "\\\""),
-                    description.replace("\"", "\\\""),
-                    3447003,
-                    detection_reason.replace("\"", "\\\""),
-                    total_items,
-                    items_breakdown.toString().replace("\"", "\\\""),
-                    center_x, center_z,
-                    server_info.replace("\"", "\\\""),
-                    System.currentTimeMillis() / 1000
-                );
-
-                HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(json_payload))
-                    .timeout(Duration.ofSeconds(30))
-                    .build();
-
-                HttpResponse<String> response = http_client.send(request,
-                    HttpResponse.BodyHandlers.ofString());
-
-                if (response.statusCode() == 204) {
-                    if (notifications.get()) info("Webhook notification sent successfully");
-                } else {
-                    if (notifications.get()) error("Webhook failed with status: " + response.statusCode());
-                }
-
-            } catch (IOException | InterruptedException e) {
-                if (notifications.get()) error("Failed to send webhook: " + e.getMessage());
-            }
-        });
+        GlazedWebhook.to(webhook_url.get())
+            .username("Block Notifier")
+            .ping(self_ping.get() ? discord_id.get() : null)
+            .title("🎯 Block Notifier Alert")
+            .description(String.format("Target blocks detected in chunk at %d, %d!", center_x, center_z))
+            .color(3447003)
+            .field("Detection Reason", detection_reason, false)
+            .field("Total Items Found", String.valueOf(total_items), false)
+            .field("Items Breakdown", items_breakdown.toString(), false)
+            .field("Coordinates", center_x + ", " + center_z, true)
+            .field("Server", server_info, true)
+            .field("Time", "<t:" + (System.currentTimeMillis() / 1000) + ":R>", true)
+            .footer("Block Notifier")
+            .onError(message -> {
+                if (notifications.get()) error("Failed to send webhook: " + message);
+            })
+            .send();
     }
 
     private void handle_disconnection(ChunkPos chunk_pos, Map<Block, Integer> found_blocks) {
-        int center_x = chunk_pos.x * 16 + 8;
-        int center_z = chunk_pos.z * 16 + 8;
+        int center_x = chunk_pos.x() * 16 + 8;
+        int center_z = chunk_pos.z() * 16 + 8;
 
         if (notifications.get()) info("TARGET BLOCKS FOUND! Disconnecting...");
         toggle();
 
         if (mc.player != null) {
             String first_block_name = found_blocks.keySet().iterator().next().getName().getString();
-            mc.player.networkHandler.onDisconnect(
-                new DisconnectS2CPacket(Text.literal(
+            mc.player.connection.handleDisconnect(
+                new ClientboundDisconnectPacket(Component.literal(
                     String.format("TARGET BLOCKS FOUND: %s at %d, %d!",
                         first_block_name, center_x, center_z)))
             );

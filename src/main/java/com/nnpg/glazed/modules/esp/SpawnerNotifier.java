@@ -1,5 +1,6 @@
 package com.nnpg.glazed.modules.esp;
 
+import com.nnpg.glazed.utils.GlazedWebhook;
 import com.nnpg.glazed.GlazedAddon;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.ChunkDataEvent;
@@ -10,26 +11,18 @@ import meteordevelopment.meteorclient.utils.render.MeteorToast;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.block.entity.MobSpawnerBlockEntity;
-import net.minecraft.item.Items;
-import net.minecraft.network.packet.s2c.common.DisconnectS2CPacket;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.util.math.Vec3d;
-
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.common.ClientboundDisconnectPacket;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.SpawnerBlockEntity;
+import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 
 public class SpawnerNotifier extends Module {
     private final SettingGroup sg_general = settings.getDefaultGroup();
@@ -156,9 +149,6 @@ public class SpawnerNotifier extends Module {
     private final Set<ChunkPos> processed_chunks = new HashSet<>();
     private final Set<BlockPos> found_spawner_positions = new HashSet<>();
     private final Set<BlockPos> new_found_spawners = new HashSet<>();
-    private final HttpClient http_client = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .build();
 
     private int total_spawners_found = 0;
 
@@ -182,7 +172,7 @@ public class SpawnerNotifier extends Module {
 
     @EventHandler
     private void on_chunk_data(ChunkDataEvent event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
 
         ChunkPos chunk_pos = event.chunk().getPos();
         if (processed_chunks.contains(chunk_pos)) return;
@@ -191,8 +181,8 @@ public class SpawnerNotifier extends Module {
         boolean has_spawners = false;
 
         for (BlockEntity block_entity : event.chunk().getBlockEntities().values()) {
-            if (block_entity instanceof MobSpawnerBlockEntity) {
-                BlockPos pos = block_entity.getPos();
+            if (block_entity instanceof SpawnerBlockEntity) {
+                BlockPos pos = block_entity.getBlockPos();
                 chunk_spawners.add(pos);
 
                 if (!found_spawner_positions.contains(pos)) {
@@ -215,7 +205,7 @@ public class SpawnerNotifier extends Module {
     private void onRender(Render3DEvent event) {
         if (mc.player == null || (!show_esp.get() && !show_tracers.get())) return;
 
-        Vec3d playerPos = mc.player.getLerpedPos(event.tickDelta);
+        Vec3 playerPos = mc.player.getPosition(event.tickDelta);
         Color sideColor = new Color(esp_color.get());
         Color lineColor = new Color(esp_color.get());
         Color tracerColorValue = new Color(tracer_color.get());
@@ -228,7 +218,7 @@ public class SpawnerNotifier extends Module {
             }
 
             if (maxDistance > 0) {
-                double distance = playerPos.distanceTo(Vec3d.ofCenter(pos));
+                double distance = playerPos.distanceTo(Vec3.atCenterOf(pos));
                 if (distance > maxDistance) {
                     continue;
                 }
@@ -239,18 +229,18 @@ public class SpawnerNotifier extends Module {
             }
 
             if (show_tracers.get()) {
-                Vec3d blockCenter = Vec3d.ofCenter(pos);
+                Vec3 blockCenter = Vec3.atCenterOf(pos);
 
-                Vec3d startPos;
-                if (mc.options.getPerspective().isFirstPerson()) {
-                    Vec3d lookDirection = mc.player.getRotationVector();
-                    startPos = new Vec3d(
+                Vec3 startPos;
+                if (mc.options.getCameraType().isFirstPerson()) {
+                    Vec3 lookDirection = mc.player.getLookAngle();
+                    startPos = new Vec3(
                         playerPos.x + lookDirection.x * 0.5,
                         playerPos.y + mc.player.getEyeHeight(mc.player.getPose()) + lookDirection.y * 0.5,
                         playerPos.z + lookDirection.z * 0.5
                     );
                 } else {
-                    startPos = new Vec3d(
+                    startPos = new Vec3(
                         playerPos.x,
                         playerPos.y + mc.player.getEyeHeight(mc.player.getPose()),
                         playerPos.z
@@ -294,15 +284,15 @@ public class SpawnerNotifier extends Module {
         }
 
         if (show_coordinates.get()) {
-            int center_x = chunk_pos.x * 16 + 8;
-            int center_z = chunk_pos.z * 16 + 8;
+            int center_x = chunk_pos.x() * 16 + 8;
+            int center_z = chunk_pos.z() * 16 + 8;
             msg.append(" at chunk ").append(center_x).append(", ").append(center_z);
         }
 
         if (show_distance.get() && mc.player != null) {
-            int center_x = chunk_pos.x * 16 + 8;
-            int center_z = chunk_pos.z * 16 + 8;
-            double distance = mc.player.getPos().distanceTo(new Vec3d(center_x, mc.player.getY(), center_z));
+            int center_x = chunk_pos.x() * 16 + 8;
+            int center_z = chunk_pos.z() * 16 + 8;
+            double distance = mc.player.position().distanceTo(new Vec3(center_x, mc.player.getY(), center_z));
             msg.append(" (").append(String.format("%.1f", distance)).append("m away)");
         }
 
@@ -311,101 +301,59 @@ public class SpawnerNotifier extends Module {
 
     private void show_toast_notification(String message) {
         try {
-            MeteorToast toast = new MeteorToast(Items.SPAWNER, title, message);
-            mc.getToastManager().add(toast);
+            MeteorToast toast = new MeteorToast.Builder(title).text(message).icon(Items.SPAWNER).build();
+            mc.getToastManager().addToast(toast);
         } catch (Exception e) {
             if (notifications.get()) info(message);
         }
     }
 
     private void send_webhook_notification(ChunkPos chunk_pos, List<BlockPos> spawner_positions) {
-        String url = webhook_url.get().trim();
-        if (url.isEmpty()) {
+        if (webhook_url.get().trim().isEmpty()) {
             if (notifications.get()) warning("Webhook URL not configured!");
             return;
         }
 
-        CompletableFuture.runAsync(() -> {
-            try {
-                String server_info = mc.getCurrentServerEntry() != null ?
-                    mc.getCurrentServerEntry().address : "Unknown Server";
+        String server_info = mc.getCurrentServer() != null ?
+            mc.getCurrentServer().ip : "Unknown Server";
 
-                String message_content = "";
-                if (self_ping.get() && !discord_id.get().trim().isEmpty()) {
-                    message_content = String.format("<@%s>", discord_id.get().trim());
-                }
+        int center_x = chunk_pos.x() * 16 + 8;
+        int center_z = chunk_pos.z() * 16 + 8;
 
-                int center_x = chunk_pos.x * 16 + 8;
-                int center_z = chunk_pos.z * 16 + 8;
+        StringBuilder spawners_breakdown = new StringBuilder();
+        for (int i = 0; i < spawner_positions.size(); i++) {
+            BlockPos pos = spawner_positions.get(i);
+            spawners_breakdown.append(String.format("• Spawner %d: %d, %d, %d\n",
+                i + 1, pos.getX(), pos.getY(), pos.getZ()));
+        }
 
-                StringBuilder spawners_breakdown = new StringBuilder();
-                for (int i = 0; i < spawner_positions.size(); i++) {
-                    BlockPos pos = spawner_positions.get(i);
-                    spawners_breakdown.append(String.format("• Spawner %d: %d, %d, %d\\n",
-                        i + 1, pos.getX(), pos.getY(), pos.getZ()));
-                }
+        String detection_reason = spawner_positions.size() == 1 ?
+            "Single spawner detected" :
+            String.format("%d spawners found in same chunk", spawner_positions.size());
 
-                String description = String.format("Spawner%s detected in chunk at %d, %d!",
-                    spawner_positions.size() > 1 ? "s" : "", center_x, center_z);
-
-                String detection_reason = spawner_positions.size() == 1 ?
-                    "Single spawner detected" :
-                    String.format("%d spawners found in same chunk", spawner_positions.size());
-
-                String json_payload = String.format(
-                    "{\"content\":\"%s\"," +
-                        "\"username\":\"Spawner Notifier\"," +
-                        "\"avatar_url\":\"https://i.imgur.com/OL2y1cr.png\"," +
-                        "\"embeds\":[{" +
-                        "\"title\":\"🔥 Spawner Alert\"," +
-                        "\"description\":\"%s\"," +
-                        "\"color\":%d," +
-                        "\"fields\":[" +
-                        "{\"name\":\"Detection Reason\",\"value\":\"%s\",\"inline\":false}," +
-                        "{\"name\":\"Total Spawners Found\",\"value\":\"%d\",\"inline\":false}," +
-                        "{\"name\":\"Spawner Positions\",\"value\": \"%s\",\"inline\":false}," +
-                        "{\"name\":\"Chunk Coordinates\",\"value\":\"%d, %d\",\"inline\":true}," +
-                        "{\"name\":\"Server\",\"value\":\"%s\",\"inline\":true}," +
-                        "{\"name\":\"Time\",\"value\":\"<t:%d:R>\",\"inline\":true}" +
-                        "]," +
-                        "\"footer\":{\"text\":\"Spawner Notifier\"}" +
-                        "}]}",
-                    message_content.replace("\"", "\\\""),
-                    description.replace("\"", "\\\""),
-                    15158332,
-                    detection_reason.replace("\"", "\\\""),
-                    spawner_positions.size(),
-                    spawners_breakdown.toString().replace("\"", "\\\""),
-                    center_x, center_z,
-                    server_info.replace("\"", "\\\""),
-                    System.currentTimeMillis() / 1000
-                );
-
-                HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(json_payload))
-                    .timeout(Duration.ofSeconds(30))
-                    .build();
-
-                HttpResponse<String> response = http_client.send(request,
-                    HttpResponse.BodyHandlers.ofString());
-
-                if (response.statusCode() == 204) {
-                    if (notifications.get()) info("Webhook notification sent successfully");
-                } else {
-                    if (notifications.get()) error("Webhook failed with status: " + response.statusCode());
-                }
-
-            } catch (IOException | InterruptedException e) {
-                if (notifications.get()) error("Failed to send webhook: " + e.getMessage());
-            }
-        });
+        GlazedWebhook.to(webhook_url.get())
+            .username("Spawner Notifier")
+            .ping(self_ping.get() ? discord_id.get() : null)
+            .title("🔥 Spawner Alert")
+            .description(String.format("Spawner%s detected in chunk at %d, %d!",
+                spawner_positions.size() > 1 ? "s" : "", center_x, center_z))
+            .color(15158332)
+            .field("Detection Reason", detection_reason, false)
+            .field("Total Spawners Found", String.valueOf(spawner_positions.size()), false)
+            .field("Spawner Positions", spawners_breakdown.toString(), false)
+            .field("Chunk Coordinates", center_x + ", " + center_z, true)
+            .field("Server", server_info, true)
+            .field("Time", "<t:" + (System.currentTimeMillis() / 1000) + ":R>", true)
+            .footer("Spawner Notifier")
+            .onError(message -> {
+                if (notifications.get()) error("Failed to send webhook: " + message);
+            })
+            .send();
     }
 
     private void handle_disconnection(ChunkPos chunk_pos, List<BlockPos> spawner_positions) {
-        int center_x = chunk_pos.x * 16 + 8;
-        int center_z = chunk_pos.z * 16 + 8;
+        int center_x = chunk_pos.x() * 16 + 8;
+        int center_z = chunk_pos.z() * 16 + 8;
 
         if (notifications.get()) info("SPAWNER%s FOUND! Disconnecting and disabling module...",
             spawner_positions.size() > 1 ? "S" : "");
@@ -417,8 +365,8 @@ public class SpawnerNotifier extends Module {
                     spawner_positions.get(0).getX(), spawner_positions.get(0).getY(), spawner_positions.get(0).getZ()) :
                 String.format("SPAWNERS FOUND IN CHUNK %d, %d!", center_x, center_z);
 
-            mc.player.networkHandler.onDisconnect(
-                new DisconnectS2CPacket(Text.literal(disconnect_message))
+            mc.player.connection.handleDisconnect(
+                new ClientboundDisconnectPacket(Component.literal(disconnect_message))
             );
         }
     }

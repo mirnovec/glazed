@@ -11,11 +11,11 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.gui.screen.ingame.InventoryScreen;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.network.packet.s2c.play.EntityStatusS2CPacket;
-import net.minecraft.screen.slot.SlotActionType;
+import net.minecraft.client.gui.screens.inventory.InventoryScreen;
+import net.minecraft.network.protocol.game.ClientboundEntityEventPacket;
+import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 
 public class AutoInvTotem extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -125,9 +125,9 @@ public class AutoInvTotem extends Module {
 
     @EventHandler
     private void onPacketReceive(PacketEvent.Receive event) {
-        if (event.packet instanceof EntityStatusS2CPacket packet) {
-            if (packet.getStatus() == 35 && mc.player != null && packet.getEntity(mc.world) == mc.player) {
-                if (openInv.get() && mc.currentScreen == null) {
+        if (event.packet instanceof ClientboundEntityEventPacket packet) {
+            if (packet.getEventId() == 35 && mc.player != null && packet.getEntity(mc.level) == mc.player) {
+                if (openInv.get() && mc.screen == null) {
                     shouldOpenInv = true;
                     invOpenTicks = invOpenDelay.get();
                     if (!disableLogs.get()) {
@@ -140,7 +140,7 @@ public class AutoInvTotem extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null) return;
+        if (mc.player == null || mc.gameMode == null) return;
 
         handleAutoInventory();
 
@@ -152,7 +152,7 @@ public class AutoInvTotem extends Module {
                 info("Totem popped! Open inventory to auto-equip a new one.");
             }
 
-            if (mc.currentScreen instanceof InventoryScreen) {
+            if (mc.screen instanceof InventoryScreen) {
                 if (!disableLogs.get()) {
                     info("Inventory already open - moving totem immediately!");
                 }
@@ -171,7 +171,7 @@ public class AutoInvTotem extends Module {
     private void handleAutoInventory() {
         if (shouldOpenInv && invOpenTicks > 0) {
             invOpenTicks--;
-            if (invOpenTicks == 0 && mc.currentScreen == null) {
+            if (invOpenTicks == 0 && mc.screen == null) {
                 mc.setScreen(new InventoryScreen(mc.player));
                 invAutoOpened = true;
                 invCloseTicks = invCloseDelay.get();
@@ -184,7 +184,7 @@ public class AutoInvTotem extends Module {
 
         if (invAutoOpened && invCloseTicks > 0) {
             invCloseTicks--;
-            if (invCloseTicks == 0 && mc.currentScreen instanceof InventoryScreen) {
+            if (invCloseTicks == 0 && mc.screen instanceof InventoryScreen) {
                 mc.setScreen(null);
                 invAutoOpened = false;
                 if (!disableLogs.get()) {
@@ -193,7 +193,7 @@ public class AutoInvTotem extends Module {
             }
         }
 
-        if (invAutoOpened && !(mc.currentScreen instanceof InventoryScreen)) {
+        if (invAutoOpened && !(mc.screen instanceof InventoryScreen)) {
             invAutoOpened = false;
             invCloseTicks = 0;
         }
@@ -236,17 +236,17 @@ public class AutoInvTotem extends Module {
                 info("Found totem in slot %d (container slot %d)", totemSlot, containerSlot);
             }
 
-            ItemStack offhandStack = mc.player.getOffHandStack();
+            ItemStack offhandStack = mc.player.getOffhandItem();
 
             if (offhandStack.isEmpty()) {
-                mc.interactionManager.clickSlot(0, containerSlot, 40, SlotActionType.SWAP, mc.player);
+                mc.gameMode.handleContainerInput(0, containerSlot, 40, ContainerInput.SWAP, mc.player);
                 if (!disableLogs.get()) {
                     info("Swapped totem to empty offhand");
                 }
             } else {
-                mc.interactionManager.clickSlot(0, containerSlot, 0, SlotActionType.PICKUP, mc.player);
-                mc.interactionManager.clickSlot(0, 45, 0, SlotActionType.PICKUP, mc.player);
-                mc.interactionManager.clickSlot(0, containerSlot, 0, SlotActionType.PICKUP, mc.player);
+                mc.gameMode.handleContainerInput(0, containerSlot, 0, ContainerInput.PICKUP, mc.player);
+                mc.gameMode.handleContainerInput(0, 45, 0, ContainerInput.PICKUP, mc.player);
+                mc.gameMode.handleContainerInput(0, containerSlot, 0, ContainerInput.PICKUP, mc.player);
                 if (!disableLogs.get()) {
                     info("3-click swapped totem to offhand");
                 }
@@ -263,14 +263,14 @@ public class AutoInvTotem extends Module {
 
     private int findTotemSlot() {
         for (int i = 9; i < 36; i++) {
-            if (mc.player.getInventory().getStack(i).getItem() == Items.TOTEM_OF_UNDYING) {
+            if (mc.player.getInventory().getItem(i).getItem() == Items.TOTEM_OF_UNDYING) {
                 return i;
             }
         }
 
         if (moveFromHotbar.get()) {
             for (int i = 0; i < 9; i++) {
-                if (mc.player.getInventory().getStack(i).getItem() == Items.TOTEM_OF_UNDYING) {
+                if (mc.player.getInventory().getItem(i).getItem() == Items.TOTEM_OF_UNDYING) {
                     return i;
                 }
             }
@@ -281,7 +281,7 @@ public class AutoInvTotem extends Module {
 
     private boolean hasTotemInOffhand() {
         if (mc.player == null) return false;
-        ItemStack offhandStack = mc.player.getOffHandStack();
+        ItemStack offhandStack = mc.player.getOffhandItem();
         return !offhandStack.isEmpty() && offhandStack.getItem() == Items.TOTEM_OF_UNDYING;
     }
 }

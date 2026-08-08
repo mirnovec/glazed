@@ -8,19 +8,17 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.entity.mob.DrownedEntity;
-import net.minecraft.item.Items;
-import net.minecraft.util.Hand;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
-
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.monster.zombie.Drowned;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import java.util.stream.StreamSupport;
 
 public class DrownedTridentESP extends Module {
 
     private final SettingGroup sgRender = settings.createGroup("Rendering");
 
-    // Appearance settings
     private final Setting<SettingColor> color = sgRender.add(new ColorSetting.Builder()
             .name("color")
             .description("Color of the ESP box and lines.")
@@ -66,38 +64,35 @@ public class DrownedTridentESP extends Module {
 
     @EventHandler
     private void onRender(Render3DEvent event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
 
-        Vec3d playerPos = mc.player.getLerpedPos(event.tickDelta);
+        Vec3 playerPos = mc.player.getPosition(event.tickDelta);
 
-        StreamSupport.stream(mc.world.getEntities().spliterator(), false)
-                .filter(entity -> entity instanceof DrownedEntity)
-                .map(entity -> (DrownedEntity) entity)
+        StreamSupport.stream(mc.level.entitiesForRendering().spliterator(), false)
+                .filter(entity -> entity instanceof Drowned)
+                .map(entity -> (Drowned) entity)
                 .filter(this::isHoldingTrident)
                 .forEach(drowned -> {
-                    Box box = drowned.getBoundingBox();
+                    AABB box = drowned.getBoundingBox();
                     Color fillColor = new Color(color.get());
                     Color lineColor = new Color(color.get());
 
-                    // Render filled box
                     if (mode.get() == RenderMode.Box || mode.get() == RenderMode.Both) {
                         event.renderer.box(box, fillColor, lineColor, ShapeMode.Sides, 0);
                     }
 
-                    // Render outline
                     if (mode.get() == RenderMode.Lines || mode.get() == RenderMode.Both) {
                         event.renderer.box(box, fillColor, lineColor, ShapeMode.Lines, 0);
                     }
 
-                    // Render tracer if enabled
                     if (tracers.get()) {
-                        Vec3d entityPos = drowned.getPos().add(0, drowned.getHeight() / 2.0, 0); // middle of entity
-                        Vec3d startPos;
+                        Vec3 entityPos = drowned.position().add(0, drowned.getBbHeight() / 2.0, 0);
+                        Vec3 startPos;
 
-                        if (mc.options.getPerspective().isFirstPerson()) {
-                            Vec3d lookDir = mc.player.getRotationVector();
+                        if (mc.options.getCameraType().isFirstPerson()) {
+                            Vec3 lookDir = mc.player.getLookAngle();
                             startPos = playerPos.add(0, mc.player.getEyeHeight(mc.player.getPose()), 0)
-                                    .add(lookDir.multiply(0.5));
+                                    .add(lookDir.scale(0.5));
                         } else {
                             startPos = playerPos.add(0, mc.player.getEyeHeight(mc.player.getPose()), 0);
                         }
@@ -109,8 +104,8 @@ public class DrownedTridentESP extends Module {
                 });
     }
 
-    private boolean isHoldingTrident(DrownedEntity drowned) {
-        return drowned.getStackInHand(Hand.MAIN_HAND).getItem() == Items.TRIDENT ||
-               drowned.getStackInHand(Hand.OFF_HAND).getItem() == Items.TRIDENT;
+    private boolean isHoldingTrident(Drowned drowned) {
+        return drowned.getItemInHand(InteractionHand.MAIN_HAND).getItem() == Items.TRIDENT ||
+               drowned.getItemInHand(InteractionHand.OFF_HAND).getItem() == Items.TRIDENT;
     }
 }

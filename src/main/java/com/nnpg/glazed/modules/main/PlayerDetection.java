@@ -1,24 +1,20 @@
 package com.nnpg.glazed.modules.main;
 
+import com.nnpg.glazed.utils.GlazedScheduler;
+import com.nnpg.glazed.utils.GlazedWebhook;
 import com.nnpg.glazed.GlazedAddon;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.meteorclient.utils.render.MeteorToast;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.Items;
-import net.minecraft.text.Text;
-
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Items;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 public class PlayerDetection extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -26,7 +22,7 @@ public class PlayerDetection extends Module {
     private final SettingGroup sgwebhook = settings.createGroup("Webhook");
     private final SettingGroup sgPanicPay = settings.createGroup("Panic Pay");
 
-    // hidden cause some freeecamera mods are retarded
+    // some freecam mods spawn a fake player with this name
     private static final Set<String> PERMANENT_WHITELIST = new HashSet<>(Arrays.asList(
         "FreeCamera"
     ));
@@ -104,7 +100,6 @@ public class PlayerDetection extends Module {
         .build()
     );
 
-    // Panic Pay Settings
     private final Setting<Boolean> enablePanicPay = sgPanicPay.add(new BoolSetting.Builder()
         .name("Enable Panic Pay")
         .description("Automatically send specified amount of money to target player when non-whitelisted player detected")
@@ -129,9 +124,6 @@ public class PlayerDetection extends Module {
     );
 
     private final Set<String> detectedPlayers = new HashSet<>();
-    private final HttpClient httpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .build();
 
     public PlayerDetection() {
         super(GlazedAddon.CATEGORY, "player-detection", "Detects when players are in the world");
@@ -139,21 +131,28 @@ public class PlayerDetection extends Module {
 
     @EventHandler
     private void onRender3D(Render3DEvent event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
 
         Set<String> currentPlayers = new HashSet<>();
-        String currentPlayerName = mc.player.getGameProfile().getName();
+        String currentPlayerName = mc.player.getGameProfile().name();
 
         Set<String> fullWhitelist = new HashSet<>(PERMANENT_WHITELIST);
         fullWhitelist.addAll(userWhitelist.get());
 
-        for (PlayerEntity player : mc.world.getPlayers()) {
+        // only SpawnerProtect used to respect this, so admins kept setting us off
+        AdminList adminList = Modules.get().get(AdminList.class);
+
+        for (Player player : mc.level.players()) {
             if (player == mc.player) continue;
 
-            String playerName = player.getGameProfile().getName();
+            String playerName = player.getGameProfile().name();
             if (playerName.equals(currentPlayerName)) continue;
 
             if (fullWhitelist.contains(playerName)) {
+                continue;
+            }
+
+            if (adminList != null && adminList.isAdmin(playerName)) {
                 continue;
             }
 
@@ -175,10 +174,10 @@ public class PlayerDetection extends Module {
 
         switch (notificationMode.get()) {
             case Chat -> { if (notifications.get()) info("Player(s) detected: (highlight)%s", playerList); }
-            case Toast -> mc.getToastManager().add(new MeteorToast(Items.PLAYER_HEAD, title, "Player Detected!"));
+            case Toast -> mc.getToastManager().addToast(new MeteorToast.Builder(title).text("Player Detected!").icon(Items.PLAYER_HEAD).build());
             case Both -> {
                 if (notifications.get()) info("Player(s) detected: (highlight)%s", playerList);
-                mc.getToastManager().add(new MeteorToast(Items.PLAYER_HEAD, title, "Player Detected!"));
+                mc.getToastManager().addToast(new MeteorToast.Builder(title).text("Player Detected!").icon(Items.PLAYER_HEAD).build());
             }
         }
 
@@ -212,90 +211,45 @@ public class PlayerDetection extends Module {
             toggle();
         }
 
-
         if (enableDisconnect.get()) {
-            CompletableFuture.runAsync(() -> {
-                try {
-                    Thread.sleep(500);
-                    disconnectFromServer(playerList);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            });
+            GlazedScheduler.schedule(() -> disconnectFromServer(playerList), 500, TimeUnit.MILLISECONDS);
         }
     }
 
     private void sendWebhookNotification(Set<String> players) {
-        String url = webhookUrl.get().trim();
-        if (url.isEmpty()) {
+        if (webhookUrl.get().trim().isEmpty()) {
             if (notifications.get()) warning("Webhook URL not configured!");
             return;
         }
 
-        CompletableFuture.runAsync(() -> {
-            try {
-                String playerList = String.join(", ", players);
-                String serverInfo = mc.getCurrentServerEntry() != null ?
-                    mc.getCurrentServerEntry().address : "Unknown Server";
+        String serverInfo = mc.getCurrentServer() != null ?
+            mc.getCurrentServer().ip : "Unknown Server";
 
-                String messageContent = "";
-                if (selfPing.get() && !discordId.get().trim().isEmpty()) {
-                    messageContent = String.format("<@%s>", discordId.get().trim());
-                }
+        GlazedWebhook.Builder webhook = GlazedWebhook.to(webhookUrl.get())
+            .ping(selfPing.get() ? discordId.get() : null)
+            .title("🚨 Player Detection Alert")
+            .description("Player(s) detected on server!")
+            .color(15158332)
+            .field("Players", String.join(", ", players), false)
+            .field("Server", serverInfo, true)
+            .field("Time", "<t:" + (System.currentTimeMillis() / 1000) + ":R>", true);
 
-                String panicPayInfo = "";
-                if (enablePanicPay.get() && !panicPayTarget.get().trim().isEmpty() && !panicPayAmount.get().trim().isEmpty()) {
-                    panicPayInfo = String.format(",{\"name\":\"Panic Pay\",\"value\":\"Activated - Target: %s, Amount: %s\",\"inline\":true}",
-                        panicPayTarget.get().trim().replace("\"", "\\\""),
-                        panicPayAmount.get().trim().replace("\"", "\\\""));
-                }
+        if (enablePanicPay.get() && !panicPayTarget.get().trim().isEmpty() && !panicPayAmount.get().trim().isEmpty()) {
+            webhook.field("Panic Pay", String.format("Activated - Target: %s, Amount: %s",
+                panicPayTarget.get().trim(), panicPayAmount.get().trim()), true);
+        }
 
-                String jsonPayload = String.format(
-                    "{\"content\":\"%s\"," +
-                        "\"embeds\":[{" +
-                        "\"title\":\"🚨 Player Detection Alert\"," +
-                        "\"description\":\"Player(s) detected on server!\"," +
-                        "\"color\":15158332," +
-                        "\"fields\":[" +
-                        "{\"name\":\"Players\",\"value\":\"%s\",\"inline\":false}," +
-                        "{\"name\":\"Server\",\"value\":\"%s\",\"inline\":true}," +
-                        "{\"name\":\"Time\",\"value\":\"<t:%d:R>\",\"inline\":true}%s" +
-                        "]," +
-                        "\"footer\":{\"text\":\"Sent by Glazed\"}" +
-                        "}]}",
-                    messageContent.replace("\"", "\\\""),
-                    playerList.replace("\"", "\\\""),
-                    serverInfo.replace("\"", "\\\""),
-                    System.currentTimeMillis() / 1000,
-                    panicPayInfo
-                );
-
-                HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-                    .timeout(Duration.ofSeconds(30))
-                    .build();
-
-                HttpResponse<String> response = httpClient.send(request,
-                    HttpResponse.BodyHandlers.ofString());
-
-                if (response.statusCode() == 204) {
-                    if (notifications.get()) info("Webhook notification sent successfully");
-                } else {
-                    if (notifications.get()) error("Webhook failed with status: " + response.statusCode());
-                }
-
-            } catch (IOException | InterruptedException e) {
-                if (notifications.get()) error("Failed to send webhook: " + e.getMessage());
-            }
-        });
+        webhook
+            .onError(message -> {
+                if (notifications.get()) error("Failed to send webhook: " + message);
+            })
+            .send();
     }
 
     private void disconnectFromServer(String playerList) {
-        if (mc.world != null && mc.getNetworkHandler() != null) {
+        if (mc.level != null && mc.getConnection() != null) {
             String reason = "Player(s) detected: " + playerList;
-            mc.getNetworkHandler().getConnection().disconnect(Text.literal(reason));
+            mc.getConnection().getConnection().disconnect(Component.literal(reason));
             if (notifications.get()) info("Disconnected from server - " + reason);
         }
     }

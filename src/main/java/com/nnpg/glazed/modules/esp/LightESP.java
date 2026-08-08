@@ -7,15 +7,14 @@ import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.world.LightType;
-import net.minecraft.world.chunk.Chunk;
-import net.minecraft.world.chunk.ChunkStatus;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -159,7 +158,7 @@ public class LightESP extends Module {
 
     private final Map<BlockPos, Integer> lightCache = new ConcurrentHashMap<>();
     private long lastScanTime = 0;
-    private static final long SCAN_INTERVAL = 500; // Scan every 500ms
+    private static final long SCAN_INTERVAL = 500;
 
     public LightESP() {
         super(GlazedAddon.esp, "light-esp", "Improved light source detection");
@@ -178,7 +177,7 @@ public class LightESP extends Module {
 
     @EventHandler
     private void onRender3D(Render3DEvent event) {
-        if (mc.world == null || mc.player == null) return;
+        if (mc.level == null || mc.player == null) return;
 
         long currentTime = System.currentTimeMillis();
         if (currentTime - lastScanTime >= SCAN_INTERVAL) {
@@ -190,16 +189,16 @@ public class LightESP extends Module {
     }
 
     private void scanForLights() {
-        if (mc.world == null || mc.player == null) return;
+        if (mc.level == null || mc.player == null) return;
 
-        ChunkPos playerChunkPos = mc.player.getChunkPos();
+        ChunkPos playerChunkPos = mc.player.chunkPosition();
         Map<BlockPos, Integer> newCache = new HashMap<>();
         int radius = chunkRadius.get();
 
-        for (int chunkX = playerChunkPos.x - radius; chunkX <= playerChunkPos.x + radius; chunkX++) {
-            for (int chunkZ = playerChunkPos.z - radius; chunkZ <= playerChunkPos.z + radius; chunkZ++) {
-                Chunk chunk = mc.world.getChunk(chunkX, chunkZ);
-                if (chunk != null && chunk.getStatus().isAtLeast(ChunkStatus.FULL)) {
+        for (int chunkX = playerChunkPos.x() - radius; chunkX <= playerChunkPos.x() + radius; chunkX++) {
+            for (int chunkZ = playerChunkPos.z() - radius; chunkZ <= playerChunkPos.z() + radius; chunkZ++) {
+                ChunkAccess chunk = mc.level.getChunk(chunkX, chunkZ);
+                if (chunk != null && chunk.getPersistedStatus().isOrAfter(ChunkStatus.FULL)) {
                     scanChunk(chunkX, chunkZ, newCache);
                 }
             }
@@ -218,27 +217,23 @@ public class LightESP extends Module {
                 for (int y = minY.get(); y <= maxY.get(); y++) {
                     BlockPos pos = new BlockPos(startX + x, y, startZ + z);
 
-                    // Distance check
-                    if (distanceLimit.get() && mc.player.squaredDistanceTo(pos.getX(), pos.getY(), pos.getZ()) > maxDistance.get() * maxDistance.get()) {
+                    if (distanceLimit.get() && mc.player.distanceToSqr(pos.getX(), pos.getY(), pos.getZ()) > maxDistance.get() * maxDistance.get()) {
                         continue;
                     }
 
-                    int blockLight = mc.world.getLightLevel(LightType.BLOCK, pos);
-                    int skyLight = mc.world.getLightLevel(LightType.SKY, pos);
+                    int blockLight = mc.level.getBrightness(LightLayer.BLOCK, pos);
+                    int skyLight = mc.level.getBrightness(LightLayer.SKY, pos);
 
-                    // Must have sufficient block light and more block light than sky light
                     if (blockLight >= minLightLevel.get() && blockLight > skyLight) {
-                        BlockState state = mc.world.getBlockState(pos);
+                        BlockState state = mc.level.getBlockState(pos);
                         Block block = state.getBlock();
 
-                        // If only source blocks, check if this is actually emitting light
                         if (onlySourceBlocks.get()) {
                             if (!isLightSourceBlock(block, state)) {
                                 continue;
                             }
                         }
 
-                        // Apply filters
                         if (!passesFilters(block)) {
                             continue;
                         }
@@ -251,13 +246,11 @@ public class LightESP extends Module {
     }
 
     private boolean isLightSourceBlock(Block block, BlockState state) {
-        // Get the luminance directly from the block
-        int luminance = state.getLuminance();
+        int luminance = state.getLightEmission();
         return luminance > 0;
     }
 
     private boolean passesFilters(Block block) {
-        // Natural light sources
         if (filterNaturalLight.get()) {
             if (block == Blocks.LAVA || 
                 block == Blocks.MAGMA_BLOCK || 
@@ -267,7 +260,6 @@ public class LightESP extends Module {
             }
         }
 
-        // Torches and lanterns
         if (!showTorches.get()) {
             if (block == Blocks.TORCH ||
                 block == Blocks.WALL_TORCH ||
@@ -279,7 +271,6 @@ public class LightESP extends Module {
             }
         }
 
-        // Glowstone and sea lanterns
         if (!showGlowstone.get()) {
             if (block == Blocks.GLOWSTONE ||
                 block == Blocks.SEA_LANTERN ||
@@ -288,7 +279,6 @@ public class LightESP extends Module {
             }
         }
 
-        // Redstone lamps
         if (!showRedstone.get()) {
             if (block == Blocks.REDSTONE_LAMP ||
                 block == Blocks.REDSTONE_TORCH ||
@@ -297,7 +287,6 @@ public class LightESP extends Module {
             }
         }
 
-        // Beacons and conduits
         if (!showBeacons.get()) {
             if (block == Blocks.BEACON ||
                 block == Blocks.CONDUIT) {
@@ -340,36 +329,30 @@ public class LightESP extends Module {
     private float[] getThermalColor(int lightLevel) {
         float[] color = new float[4];
 
-        // Progressive alpha based on light level
         float normalized = lightLevel / 15.0f;
         color[3] = 0.3f + (normalized * 0.7f);
 
-        // Color gradient: Dark blue -> Yellow -> Orange -> Red -> White
         if (lightLevel <= 5) {
-            // Dark blue to blue
             float t = lightLevel / 5.0f;
             color[0] = 0.0f + t * 0.2f;
             color[1] = 0.0f + t * 0.4f;
             color[2] = 0.4f + t * 0.6f;
         } else if (lightLevel <= 9) {
-            // Blue to yellow
             float t = (lightLevel - 5) / 4.0f;
             color[0] = 0.2f + t * 0.8f;
             color[1] = 0.4f + t * 0.6f;
             color[2] = 1.0f - t * 0.8f;
         } else if (lightLevel <= 12) {
-            // Yellow to orange/red
             float t = (lightLevel - 9) / 3.0f;
             color[0] = 1.0f;
             color[1] = 1.0f - t * 0.5f;
             color[2] = 0.2f - t * 0.2f;
         } else {
-            // Bright red to white (level 15 = pure white)
             float t = (lightLevel - 12) / 3.0f;
             color[0] = 1.0f;
             color[1] = 0.5f + t * 0.5f;
             color[2] = 0.0f + t * 1.0f;
-            color[3] = 0.8f + t * 0.2f; // Max alpha for brightest
+            color[3] = 0.8f + t * 0.2f;
         }
 
         return color;

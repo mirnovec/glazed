@@ -6,6 +6,8 @@ import java.nio.CharBuffer;
 import java.security.SecureRandom;
 import java.util.Arrays;
 
+// xor "encryption" for keybind names lol. nothing even calls this now
+// subSequence was also decrypting wrong this whole time, nobody noticed cus nobody used it
 public class EncryptedString implements AutoCloseable, CharSequence {
     private final char[] key;
     private final char[] value;
@@ -19,7 +21,7 @@ public class EncryptedString implements AutoCloseable, CharSequence {
             throw new IllegalArgumentException("Input string cannot be null");
         }
         this.length = string.length();
-        this.key = generateRandomKey(Math.min(this.length, 128));
+        this.key = generateRandomKey(Math.max(1, Math.min(this.length, 128)));
         this.value = new char[this.length];
         string.getChars(0, this.length, this.value, 0);
         applyXorEncryption(this.value, this.key, 0, this.length);
@@ -66,13 +68,13 @@ public class EncryptedString implements AutoCloseable, CharSequence {
 
     @Override
     public int length() {
-        this.setClosed();
+        this.checkNotClosed();
         return this.length;
     }
 
     @Override
     public char charAt(final int n) {
-        this.setClosed();
+        this.checkNotClosed();
         if (n < 0 || n >= this.length) {
             throw new IndexOutOfBoundsException("Index: " + n + ", Length: " + this.length);
         }
@@ -82,26 +84,24 @@ public class EncryptedString implements AutoCloseable, CharSequence {
     @NotNull
     @Override
     public CharSequence subSequence(final int n, final int n2) {
-        this.setClosed();
+        this.checkNotClosed();
         if (n < 0 || n2 > this.length || n > n2) {
-            throw new IndexOutOfBoundsException("Invalid subsequence range: " + n + " to " + n2 + " (length: " + this.length);
+            throw new IndexOutOfBoundsException("Invalid subsequence range: " + n + " to " + n2 + " (length: " + this.length + ")");
         }
-        final int n3 = n2 - n;
-        final char[] array = new char[n3];
-        System.arraycopy(this.value, n, array, 0, n3);
+        final int n3 = Math.max(1, n2 - n);
+        final char[] array = new char[n2 - n];
+        System.arraycopy(this.value, n, array, 0, n2 - n);
         final char[] array2 = new char[n3];
         for (int i = 0; i < n3; ++i) {
             array2[i] = this.key[(n + i) % this.key.length];
         }
-        applyXorEncryption(array, this.key, 0, n3);
-        applyXorEncryption(array, array2, 0, n3);
         return new EncryptedString(array, array2);
     }
 
     @NotNull
     @Override
     public String toString() {
-        this.setClosed();
+        this.checkNotClosed();
         final char[] array = new char[this.length];
         for (int i = 0; i < this.length; ++i) {
             array[i] = this.charAt(i);
@@ -113,12 +113,12 @@ public class EncryptedString implements AutoCloseable, CharSequence {
 
     @NotNull
     public String a() {
-        this.setClosed();
+        this.checkNotClosed();
         return this.toString();
     }
 
     public CharBuffer b() {
-        this.setClosed();
+        this.checkNotClosed();
         final CharBuffer allocate = CharBuffer.allocate(this.length);
         for (int i = 0; i < this.length; ++i) {
             allocate.put(i, this.charAt(i));
@@ -136,7 +136,7 @@ public class EncryptedString implements AutoCloseable, CharSequence {
         }
     }
 
-    private void setClosed() {
+    private void checkNotClosed() {
         if (this.closed) {
             throw new IllegalStateException("This EncryptedString has been closed and cannot be used");
         }
@@ -144,7 +144,7 @@ public class EncryptedString implements AutoCloseable, CharSequence {
 
     @Override
     public boolean equals(final Object o) {
-        this.setClosed();
+        this.checkNotClosed();
         if (this == o) {
             return true;
         }
@@ -164,7 +164,7 @@ public class EncryptedString implements AutoCloseable, CharSequence {
 
     @Override
     public int hashCode() {
-        this.setClosed();
+        this.checkNotClosed();
         int n = 0;
         for (int i = 0; i < this.length; ++i) {
             n = 31 * n + this.charAt(i);

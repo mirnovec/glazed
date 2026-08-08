@@ -1,25 +1,23 @@
 package com.nnpg.glazed.modules.main;
 
 import com.nnpg.glazed.GlazedAddon;
+import com.nnpg.glazed.utils.GlazedSell;
 import com.nnpg.glazed.VersionUtil;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.ingame.GenericContainerScreen;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.screen.slot.SlotActionType;
-
+import net.minecraft.client.gui.screens.inventory.ContainerScreen;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import java.util.*;
 
 public class EmergencySeller extends Module {
-    private final MinecraftClient mc = MinecraftClient.getInstance();
 
     private final SettingGroup sg = settings.getDefaultGroup();
 
@@ -73,7 +71,7 @@ public class EmergencySeller extends Module {
         ticksSinceCommand = 0;
 
         for (int i = 0; i < 40; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+            ItemStack stack = mc.player.getInventory().getItem(i);
 
             if (i == 0 && sellSlot0.get() && !stack.isEmpty()) {
                 targets.add(i);
@@ -95,31 +93,31 @@ public class EmergencySeller extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
-        if (mc.player == null || index >= targets.size()) {
+        if (mc.player == null || mc.gameMode == null || index >= targets.size()) {
             toggle();
             return;
         }
 
         int slot = targets.get(index);
-        ItemStack stack = mc.player.getInventory().getStack(slot);
+        ItemStack stack = mc.player.getInventory().getItem(slot);
         currentItem = stack.getItem();
 
         int retry = retries.getOrDefault(slot, 0);
 
         if (!commandSent) {
 
-            if (slot != 0 && mc.player.currentScreenHandler != null) {
+            if (slot != 0 && mc.player.containerMenu != null) {
                 int realId = getSlotId(slot);
-                mc.interactionManager.clickSlot(mc.player.currentScreenHandler.syncId, realId, 0, SlotActionType.SWAP, mc.player);
+                mc.gameMode.handleContainerInput(mc.player.containerMenu.containerId, realId, 0, ContainerInput.SWAP, mc.player);
             }
 
             VersionUtil.setSelectedSlot(mc.player, 0);
 
-            if (mc.player.getMainHandStack().isOf(currentItem)) {
+            if (mc.player.getMainHandItem().is(currentItem)) {
                 ticksSinceCommand++;
 
                 if (ticksSinceCommand >= 5) {
-                    mc.player.networkHandler.sendChatCommand("ah sell 1b");
+                    mc.player.connection.sendCommand("ah sell 1b");
                     mc.setScreen(null);
                     commandSent = true;
                     ticksSinceCommand = 0;
@@ -132,8 +130,17 @@ public class EmergencySeller extends Module {
         if (commandSent) {
             ticksSinceCommand++;
 
-            if (mc.currentScreen instanceof GenericContainerScreen screen) {
-                ScreenHandler handler = screen.getScreenHandler();
+            // the confirm is sometimes a server dialog with Yes / No buttons instead of a chest
+            if (GlazedSell.isDialogOpen()) {
+                if (GlazedSell.clickDialogYes()) {
+                    if (notifications.get()) ChatUtils.info("Sold " + currentItem.getName(ItemStack.EMPTY).getString());
+                    nextItem();
+                }
+                return;
+            }
+
+            if (mc.screen instanceof ContainerScreen screen) {
+                AbstractContainerMenu handler = screen.getMenu();
 
                 if (confirmClick(handler, 15)) return;
 
@@ -147,12 +154,12 @@ public class EmergencySeller extends Module {
                 retries.put(slot, retry + 1);
                 if (retry + 1 >= maxRetries) {
                     if (notifications.get()) {
-                        ChatUtils.warning("Timeout for item %s.", currentItem.getName().getString());
+                        ChatUtils.warning("Timeout for item %s.", currentItem.getName(ItemStack.EMPTY).getString());
                     }
                     nextItem();
                 } else {
                     if (notifications.get()) {
-                        ChatUtils.info("Retrying item", currentItem.getName().getString(), retry + 2, maxRetries);
+                        ChatUtils.info("Retrying item", currentItem.getName(ItemStack.EMPTY).getString(), retry + 2, maxRetries);
                     }
                     commandSent = false; // retry
                     ticksSinceCommand = 0;
@@ -161,14 +168,14 @@ public class EmergencySeller extends Module {
         }
     }
 
-    private boolean confirmClick(ScreenHandler handler, int slotId) {
+    private boolean confirmClick(AbstractContainerMenu handler, int slotId) {
         if (slotId >= handler.slots.size()) return false;
 
         Slot slot = handler.getSlot(slotId);
-        if (slot != null && !slot.getStack().isEmpty() && isGreenGlass(slot.getStack())) {
-            mc.interactionManager.clickSlot(handler.syncId, slot.id, 0, SlotActionType.PICKUP, mc.player);
+        if (slot != null && !slot.getItem().isEmpty() && GlazedSell.isConfirmButton(slot.getItem())) {
+            mc.gameMode.handleContainerInput(handler.containerId, slot.index, 0, ContainerInput.PICKUP, mc.player);
             if (notifications.get()) {
-                ChatUtils.info("Sold " + currentItem.getName().getString());
+                ChatUtils.info("Sold " + currentItem.getName(ItemStack.EMPTY).getString());
             }
             nextItem();
             return true;
@@ -187,10 +194,10 @@ public class EmergencySeller extends Module {
     }
 
     private int getSlotId(int invIndex) {
-        if (mc.player.currentScreenHandler != null) {
-            for (Slot slot : mc.player.currentScreenHandler.slots) {
-                if (slot.inventory == mc.player.getInventory() && slot.getIndex() == invIndex) {
-                    return slot.id;
+        if (mc.player.containerMenu != null) {
+            for (Slot slot : mc.player.containerMenu.slots) {
+                if (slot.container == mc.player.getInventory() && slot.getContainerSlot() == invIndex) {
+                    return slot.index;
                 }
             }
         }

@@ -5,8 +5,8 @@ import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.item.Items;
-import net.minecraft.util.Hand;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.Items;
 import meteordevelopment.meteorclient.utils.misc.Keybind;
 import org.lwjgl.glfw.GLFW;
 
@@ -57,7 +57,7 @@ public class KeyPearl extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.interactionManager == null) return;
+        if (mc.player == null || mc.gameMode == null) return;
 
         boolean keyCurrentlyPressed = activateKey.get().isPressed();
 
@@ -73,9 +73,9 @@ public class KeyPearl extends Module {
                 return;
             }
 
-            if (mc.player.getMainHandStack().getItem() == Items.ENDER_PEARL) {
-                mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
-                mc.player.swingHand(Hand.MAIN_HAND);
+            if (mc.player.getMainHandItem().getItem() == Items.ENDER_PEARL) {
+                mc.gameMode.useItem(mc.player, InteractionHand.MAIN_HAND);
+                mc.player.swing(InteractionHand.MAIN_HAND);
             }
 
             if (switchBack.get()) {
@@ -95,10 +95,10 @@ public class KeyPearl extends Module {
     private void throwPearl() {
         if (mc.player == null) return;
 
-        prevSlot = mc.player.getInventory().selectedSlot;
+        prevSlot = mc.player.getInventory().getSelectedSlot();
 
         for (int i = 0; i < 9; i++) {
-            if (mc.player.getInventory().getStack(i).getItem() == Items.ENDER_PEARL) {
+            if (mc.player.getInventory().getItem(i).getItem() == Items.ENDER_PEARL) {
                 mc.player.getInventory().setSelectedSlot(i);
                 throwing = true;
                 delayCounter = 0;

@@ -1,5 +1,6 @@
 package com.nnpg.glazed.modules.main;
 
+import com.nnpg.glazed.utils.GlazedWebhook;
 import com.nnpg.glazed.GlazedAddon;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
@@ -9,13 +10,12 @@ import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.biome.Biome;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.RegistryKeys;
-import net.minecraft.util.Identifier;
-import net.minecraft.text.Text;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundPlayerPositionPacket;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.level.biome.Biome;
 import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import meteordevelopment.meteorclient.gui.widgets.WLabel;
@@ -24,17 +24,10 @@ import meteordevelopment.meteorclient.gui.WindowScreen;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
 import meteordevelopment.meteorclient.gui.widgets.input.WTextBox;
 
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 
 public class RTPer extends Module {
 
@@ -294,9 +287,6 @@ public class RTPer extends Module {
     private int targetDistanceBlocks = 1000;
     private boolean biomeFound = false;
 
-    private final HttpClient httpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .build();
 
     public RTPer() {
         super(GlazedAddon.CATEGORY, "rtper", "RTP to specific coordinates or find specific biomes.");
@@ -350,7 +340,7 @@ public class RTPer extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
 
         if (rtpMode.get() == RTPMode.COORDINATES) {
             handleCoordinatesMode();
@@ -386,8 +376,8 @@ public class RTPer extends Module {
 
             if (disconnectOnReach.get()) {
                 if (notifications.get()) info("Disconnecting...");
-                if (mc.world != null) {
-                    mc.world.disconnect();
+                if (mc.level != null) {
+                    mc.level.disconnect(Component.empty());
                 }
             }
 
@@ -409,7 +399,7 @@ public class RTPer extends Module {
                 sendWebhook("Biome Found!",
                     String.format("Found %s biome in %s!\\nAttempts: %d\\nPosition: %d, %d, %d",
                         targetBiome.get().getDisplayName(), rtpRegion.get().getCommandPart(), rtpAttempts,
-                        mc.player.getBlockPos().getX(), mc.player.getBlockPos().getY(), mc.player.getBlockPos().getZ()),
+                        mc.player.blockPosition().getX(), mc.player.blockPosition().getY(), mc.player.blockPosition().getZ()),
                     0x00FF00);
             }
 
@@ -434,18 +424,18 @@ public class RTPer extends Module {
     }
 
     private boolean isInTargetBiome() {
-        if (mc.world == null || mc.player == null) return false;
+        if (mc.level == null || mc.player == null) return false;
 
-        BlockPos pos = mc.player.getBlockPos();
+        BlockPos pos = mc.player.blockPosition();
         String biomeId = getBiomeIdAt(pos);
         if (biomeId == null) return false;
         return biomeId.equals(targetBiome.get().getId());
     }
 
     private String getCurrentBiome() {
-        if (mc.world == null || mc.player == null) return "Unknown";
+        if (mc.level == null || mc.player == null) return "Unknown";
 
-        BlockPos pos = mc.player.getBlockPos();
+        BlockPos pos = mc.player.blockPosition();
         String biomeId = getBiomeIdAt(pos);
         if (biomeId == null) return "Unknown";
 
@@ -456,10 +446,10 @@ public class RTPer extends Module {
     }
 
     private String getBiomeIdAt(BlockPos pos) {
-        if (mc.world == null) return null;
-        Biome biome = mc.world.getBiome(pos).value();
+        if (mc.level == null) return null;
+        Biome biome = mc.level.getBiome(pos).value();
         if (biome == null) return null;
-        Identifier id = mc.world.getRegistryManager().getOrThrow(RegistryKeys.BIOME).getId(biome);
+        Identifier id = mc.level.registryAccess().lookupOrThrow(Registries.BIOME).getKey(biome);
         return id != null ? id.toString() : null;
     }
 
@@ -481,28 +471,28 @@ public class RTPer extends Module {
     private void disconnectWithMessage(String message) {
         try {
             if (mc != null) {
-                if (mc.getNetworkHandler() != null && mc.getNetworkHandler().getConnection() != null) {
-                    mc.getNetworkHandler().getConnection().disconnect(Text.literal(message));
+                if (mc.getConnection() != null && mc.getConnection().getConnection() != null) {
+                    mc.getConnection().getConnection().disconnect(Component.literal(message));
                     return;
                 }
-                if (mc.player != null && mc.player.networkHandler != null && mc.player.networkHandler.getConnection() != null) {
-                    mc.player.networkHandler.getConnection().disconnect(Text.literal(message));
+                if (mc.player != null && mc.player.connection != null && mc.player.connection.getConnection() != null) {
+                    mc.player.connection.getConnection().disconnect(Component.literal(message));
                     return;
                 }
-                if (mc.world != null) {
-                    mc.world.disconnect();
+                if (mc.level != null) {
+                    mc.level.disconnect(Component.empty());
                 }
             }
         } catch (Exception ignored) {
-            if (mc != null && mc.world != null) mc.world.disconnect();
+            if (mc != null && mc.level != null) mc.level.disconnect(Component.empty());
         }
     }
 
     @EventHandler
     private void onPacketReceive(PacketEvent.Receive event) {
-        if (event.packet instanceof PlayerPositionLookS2CPacket && mc.player != null) {
+        if (event.packet instanceof ClientboundPlayerPositionPacket && mc.player != null) {
             isRtping = false;
-            BlockPos currentPos = mc.player.getBlockPos();
+            BlockPos currentPos = mc.player.blockPosition();
 
             if (lastRtpPos == null || !currentPos.equals(lastRtpPos)) {
                 rtpAttempts++;
@@ -563,7 +553,7 @@ public class RTPer extends Module {
     private double getCurrentDistance() {
         if (mc.player == null) return Double.MAX_VALUE;
 
-        BlockPos pos = mc.player.getBlockPos();
+        BlockPos pos = mc.player.blockPosition();
         double dx = pos.getX() - targetX.get();
         double dz = pos.getZ() - targetZ.get();
 
@@ -607,76 +597,23 @@ public class RTPer extends Module {
     private void sendWebhook(String title, String description, int color) {
         if (!webhookEnabled.get() || webhookUrl.get().isEmpty()) return;
 
-        CompletableFuture.runAsync(() -> {
-            try {
-                String serverInfo = mc.getCurrentServerEntry() != null ?
-                    mc.getCurrentServerEntry().address : "Unknown Server";
+        String serverInfo = mc.getCurrentServer() != null ?
+            mc.getCurrentServer().ip : "Unknown Server";
 
-                String messageContent = "";
-                if (selfPing.get() && !discordId.get().trim().isEmpty()) {
-                    messageContent = String.format("<@%s>", discordId.get().trim());
-                }
-
-                String timestamp = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
-
-                String jsonPayload = String.format("""
-                    {
-                        "content": "%s",
-                        "username": "RTPer Webhook",
-                        "avatar_url": "https://i.imgur.com/OL2y1cr.png",
-                        "embeds": [{
-                            "title": "🎯 RTPer Alert",
-                            "description": "%s",
-                            "color": %d,
-                            "fields": [
-                                {
-                                    "name": "Status",
-                                    "value": "%s",
-                                    "inline": true
-                                },
-                                {
-                                    "name": "Server",
-                                    "value": "%s",
-                                    "inline": true
-                                },
-                                {
-                                    "name": "Time",
-                                    "value": "<t:%d:R>",
-                                    "inline": true
-                                }
-                            ],
-                            "footer": {
-                                "text": "RTPer by Glazed"
-                            },
-                            "timestamp": "%sZ"
-                        }]
-                    }""",
-                    messageContent.replace("\"", "\\\""),
-                    description.replace("\"", "\\\"").replace("\\n", "\\n"),
-                    color,
-                    title.replace("\"", "\\\""),
-                    serverInfo.replace("\"", "\\\""),
-                    System.currentTimeMillis() / 1000,
-                    timestamp);
-
-                HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(webhookUrl.get()))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-                    .timeout(Duration.ofSeconds(30))
-                    .build();
-
-                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-                if (response.statusCode() == 204) {
-                    if (notifications.get()) info("Webhook sent successfully");
-                } else {
-                    if (notifications.get()) error("Webhook failed with status: %d", response.statusCode());
-                }
-            } catch (IOException | InterruptedException e) {
-                if (notifications.get()) error("Webhook error: %s", e.getMessage());
-            }
-        });
+        GlazedWebhook.to(webhookUrl.get())
+            .username("RTPer Webhook")
+            .ping(selfPing.get() ? discordId.get() : null)
+            .title("🎯 RTPer Alert")
+            .description(description)
+            .color(color)
+            .field("Status", title, true)
+            .field("Server", serverInfo, true)
+            .field("Time", "<t:" + (System.currentTimeMillis() / 1000) + ":R>", true)
+            .footer("RTPer by Glazed")
+            .onError(message -> {
+                if (notifications.get()) error("Webhook error: %s", message);
+            })
+            .send();
     }
 
     @Override
