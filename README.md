@@ -1,3 +1,4 @@
+# THIS VERSION IS DISCONTINUED AND WONT GET UPDATES
 # Glazed
 <p align="center">
   <img src="https://nnpg.dev/Glazedlogo.png" alt="Glazed Addon Banner" width="300"/>
