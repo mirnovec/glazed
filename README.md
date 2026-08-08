@@ -16,7 +16,7 @@
 
 **Glazed** is a free Meteor Client addon designed specifically for the **DonutSMP** server. I made this to automate the boring and repetitive tasks I kept doing in-game and to give others access to high-quality tools **without paying**. I've seen many paid clients that do less than this one — this is my free alternative.
 
-**56 modules** across 3 categories. Minecraft **1.21.4, 1.21.11, 26.1.2**.
+**63 modules** across 3 categories. Minecraft **1.21.4, 1.21.11, 26.1.2**.
 
 ---
 
@@ -54,7 +54,7 @@
 | Tab Detector | Detects when specific players join/leave |
 | TPA Macro | Spam-sends /tpa or /tpahere + auto-clicks confirmation |
 
-### ESP Modules (20)
+### ESP Modules (27)
 
 | Module | Description |
 |---|---|
@@ -65,10 +65,14 @@
 | Beehive ESP | Detects full beehives with threading + tracer |
 | Block Notifier | Notifies when selected blocks appear + ESP |
 | Chunk Finder | Finds suspicious chunk patterns + 13 optional base detectors |
+| Collectible ESP | Highlights framed collectibles + banners |
 | Covered Hole | Detects covered holes with performance optimization |
+| Deepslate ESP | ESP for deepslate variants |
+| Dripstone ESP | Detects long dripstones with threading |
 | Drowned Trident ESP | Highlights drowned with tridents |
 | Hole Tunnel Stairs ESP | Highlights holes, tunnels, stairs |
 | Invis ESP | 3D hitbox rendering for invisible players and mobs |
+| Kelp ESP | Highlights suspicious kelp chunk patterns |
 | Light ESP | Light source detection with thermal color rendering |
 | Llama ESP | Detects llamas with tracers + webhook |
 | Pillager ESP | ESP for pillagers + tracers + webhook |
@@ -77,7 +81,10 @@
 | Rotated Deepslate ESP | Highlights rotated deepslate blocks |
 | Skeleton ESP | Renders skeleton model inside players |
 | Spawner Notifier | Notifies when spawners are detected + ESP |
+| Sweet Berry ESP | Detects berry bushes at specific growth stages |
 | Villager ESP | Detects villagers + zombie villagers |
+| Vine ESP | Highlights vines touching the ground |
+| Wandering ESP | Detects wandering traders |
 
 ### PvP Modules (9)
 
