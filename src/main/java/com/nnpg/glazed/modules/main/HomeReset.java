@@ -1,6 +1,8 @@
 package com.nnpg.glazed.modules.main;
 
+
 import com.nnpg.glazed.GlazedAddon;
+import com.nnpg.glazed.utils.GlazedScheduler;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
@@ -9,6 +11,7 @@ import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 
 public class HomeReset extends Module {
+
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
 
     private final Setting<Boolean> chatFeedback = sgGeneral.add(new BoolSetting.Builder()
@@ -32,31 +35,31 @@ public class HomeReset extends Module {
 
     @Override
     public void onActivate() {
-        if (mc.player == null || mc.world == null) return;
+        // used to just return and sit there still enabled doing nothing
+        if (mc.player == null || mc.level == null) {
+            if (chatFeedback.get()) ChatUtils.warning("Not in a world.");
+            toggle();
+            return;
+        }
 
         int slot = homeSlot.get();
+        sendServerCommand("/delhome " + slot);
 
-        mc.execute(() -> {
-            sendServerCommand("/delhome " + slot);
+        GlazedScheduler.scheduleSeconds(() -> {
+            // you can dc during the 1s wait
+            if (mc.player == null || mc.level == null) {
+                toggle();
+                return;
+            }
 
-            new Thread(() -> {
-                try {
-                    Thread.sleep(1000); // 1 second delay
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
+            sendServerCommand("/sethome " + slot);
 
-                mc.execute(() -> {
-                    sendServerCommand("/sethome " + slot);
+            if (chatFeedback.get()) {
+                ChatUtils.info("§aHome " + slot + " deleted and set successfully!");
+            }
 
-                    if (chatFeedback.get()) {
-                        ChatUtils.info("§aHome " + slot + " deleted and set successfully!");
-                    }
-
-                    toggle(); // Disable module after running
-                });
-            }, "HomeReset-DelayThread").start();
-        });
+            toggle();
+        }, 1);
     }
 
     private void sendServerCommand(String command) {

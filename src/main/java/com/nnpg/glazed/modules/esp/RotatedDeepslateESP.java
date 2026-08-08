@@ -11,16 +11,15 @@ import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.state.property.Properties;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.chunk.Chunk;
-import net.minecraft.world.chunk.WorldChunk;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.phys.Vec3;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -138,10 +137,8 @@ public class RotatedDeepslateESP extends Module {
         .visible(useThreading::get)
         .build());
 
-    // Thread-safe collection
     private final Set<BlockPos> rotatedDeepslatePositions = ConcurrentHashMap.newKeySet();
 
-    // Threading
     private ExecutorService threadPool;
 
     public RotatedDeepslateESP() {
@@ -150,9 +147,8 @@ public class RotatedDeepslateESP extends Module {
 
     @Override
     public void onActivate() {
-        if (mc.world == null) return;
+        if (mc.level == null) return;
 
-        // Initialize thread pool
         if (useThreading.get()) {
             threadPool = Executors.newFixedThreadPool(threadPoolSize.get());
         }
@@ -160,23 +156,20 @@ public class RotatedDeepslateESP extends Module {
         rotatedDeepslatePositions.clear();
 
         if (useThreading.get()) {
-            // Scan chunks asynchronously
-            for (Chunk chunk : Utils.chunks()) {
-                if (chunk instanceof WorldChunk worldChunk) {
+            for (ChunkAccess chunk : Utils.chunks()) {
+                if (chunk instanceof LevelChunk worldChunk) {
                     threadPool.submit(() -> scanChunkForRotatedDeepslate(worldChunk));
                 }
             }
         } else {
-            // Scan chunks synchronously
-            for (Chunk chunk : Utils.chunks()) {
-                if (chunk instanceof WorldChunk worldChunk) scanChunkForRotatedDeepslate(worldChunk);
+            for (ChunkAccess chunk : Utils.chunks()) {
+                if (chunk instanceof LevelChunk worldChunk) scanChunkForRotatedDeepslate(worldChunk);
             }
         }
     }
 
     @Override
     public void onDeactivate() {
-        // Shutdown thread pool
         if (threadPool != null && !threadPool.isShutdown()) {
             threadPool.shutdown();
             threadPool = null;
@@ -199,7 +192,6 @@ public class RotatedDeepslateESP extends Module {
         BlockPos pos = event.pos;
         BlockState state = event.newState;
 
-        // Create a task for block update processing
         Runnable updateTask = () -> {
             boolean isRotated = isRotatedDeepslate(state, pos.getY());
             if (isRotated) {
@@ -220,12 +212,12 @@ public class RotatedDeepslateESP extends Module {
         }
     }
 
-    private void scanChunkForRotatedDeepslate(WorldChunk chunk) {
+    private void scanChunkForRotatedDeepslate(LevelChunk chunk) {
         ChunkPos cpos = chunk.getPos();
-        int xStart = cpos.getStartX();
-        int zStart = cpos.getStartZ();
-        int yMin = Math.max(chunk.getBottomY(), minY.get());
-        int yMax = Math.min(chunk.getBottomY() + chunk.getHeight(), maxY.get());
+        int xStart = cpos.getMinBlockX();
+        int zStart = cpos.getMinBlockZ();
+        int yMin = Math.max(chunk.getMinY(), minY.get());
+        int yMax = Math.min(chunk.getMinY() + chunk.getHeight(), maxY.get());
 
         Set<BlockPos> chunkRotatedDeepslate = new HashSet<>();
         int foundCount = 0;
@@ -243,13 +235,11 @@ public class RotatedDeepslateESP extends Module {
             }
         }
 
-        // Remove old rotated deepslate positions from this chunk
         rotatedDeepslatePositions.removeIf(pos -> {
             ChunkPos blockChunk = new ChunkPos(pos);
             return blockChunk.equals(cpos) && !chunkRotatedDeepslate.contains(pos);
         });
 
-        // Add new rotated deepslate positions
         int newBlocks = 0;
         for (BlockPos pos : chunkRotatedDeepslate) {
             if (rotatedDeepslatePositions.add(pos)) {
@@ -257,7 +247,6 @@ public class RotatedDeepslateESP extends Module {
             }
         }
 
-        // Provide chunk-level feedback to reduce spam
         if (deepslateChat.get() && foundCount > 0) {
             if (useThreading.get() && limitChatSpam.get()) {
                 if (newBlocks > 0) {
@@ -278,28 +267,28 @@ public class RotatedDeepslateESP extends Module {
     private boolean isRotatedDeepslate(BlockState state, int y) {
         if (y < minY.get() || y > maxY.get()) return false;
 
-        if (!state.contains(Properties.AXIS)) return false;
+        if (!state.hasProperty(BlockStateProperties.AXIS)) return false;
 
-        Direction.Axis axis = state.get(Properties.AXIS);
-        if (axis == Direction.Axis.Y) return false; // Not rotated if on Y axis
+        Direction.Axis axis = state.getValue(BlockStateProperties.AXIS);
+        if (axis == Direction.Axis.Y) return false;
 
-        if (includeRegularDeepslate.get() && state.isOf(Blocks.DEEPSLATE)) {
+        if (includeRegularDeepslate.get() && state.is(Blocks.DEEPSLATE)) {
             return true;
         }
 
-        if (includePolishedDeepslate.get() && state.isOf(Blocks.POLISHED_DEEPSLATE)) {
+        if (includePolishedDeepslate.get() && state.is(Blocks.POLISHED_DEEPSLATE)) {
             return true;
         }
 
-        if (includeDeepslateBricks.get() && state.isOf(Blocks.DEEPSLATE_BRICKS)) {
+        if (includeDeepslateBricks.get() && state.is(Blocks.DEEPSLATE_BRICKS)) {
             return true;
         }
 
-        if (includeDeepslateTiles.get() && state.isOf(Blocks.DEEPSLATE_TILES)) {
+        if (includeDeepslateTiles.get() && state.is(Blocks.DEEPSLATE_TILES)) {
             return true;
         }
 
-        if (includeChiseledDeepslate.get() && state.isOf(Blocks.CHISELED_DEEPSLATE)) {
+        if (includeChiseledDeepslate.get() && state.is(Blocks.CHISELED_DEEPSLATE)) {
             return true;
         }
 
@@ -307,15 +296,15 @@ public class RotatedDeepslateESP extends Module {
     }
 
     private String getBlockTypeName(BlockState state) {
-        if (state.isOf(Blocks.DEEPSLATE)) {
+        if (state.is(Blocks.DEEPSLATE)) {
             return "Rotated Deepslate";
-        } else if (state.isOf(Blocks.POLISHED_DEEPSLATE)) {
+        } else if (state.is(Blocks.POLISHED_DEEPSLATE)) {
             return "Rotated Polished Deepslate";
-        } else if (state.isOf(Blocks.DEEPSLATE_BRICKS)) {
+        } else if (state.is(Blocks.DEEPSLATE_BRICKS)) {
             return "Rotated Deepslate Bricks";
-        } else if (state.isOf(Blocks.DEEPSLATE_TILES)) {
+        } else if (state.is(Blocks.DEEPSLATE_TILES)) {
             return "Rotated Deepslate Tiles";
-        } else if (state.isOf(Blocks.CHISELED_DEEPSLATE)) {
+        } else if (state.is(Blocks.CHISELED_DEEPSLATE)) {
             return "Rotated Chiseled Deepslate";
         }
         return "Rotated Deepslate Block";
@@ -325,33 +314,27 @@ public class RotatedDeepslateESP extends Module {
     private void onRender(Render3DEvent event) {
         if (mc.player == null) return;
 
-        // Use interpolated position for smooth movement
-        Vec3d playerPos = mc.player.getLerpedPos(event.tickDelta);
+        Vec3 playerPos = mc.player.getPosition(event.tickDelta);
         Color side = new Color(deepslateColor.get());
         Color outline = new Color(deepslateColor.get());
         Color tracerColorValue = new Color(tracerColor.get());
 
         for (BlockPos pos : rotatedDeepslatePositions) {
-            // Render ESP box
             event.renderer.box(pos, side, outline, deepslateShapeMode.get(), 0);
 
-            // Render tracer if enabled
             if (tracers.get()) {
-                Vec3d blockCenter = Vec3d.ofCenter(pos);
+                Vec3 blockCenter = Vec3.atCenterOf(pos);
 
-                // Start tracer from slightly in front of camera to make it visible in first person
-                Vec3d startPos;
-                if (mc.options.getPerspective().isFirstPerson()) {
-                    // First person: start tracer slightly forward from camera
-                    Vec3d lookDirection = mc.player.getRotationVector();
-                    startPos = new Vec3d(
+                Vec3 startPos;
+                if (mc.options.getCameraType().isFirstPerson()) {
+                    Vec3 lookDirection = mc.player.getLookAngle();
+                    startPos = new Vec3(
                         playerPos.x + lookDirection.x * 0.5,
                         playerPos.y + mc.player.getEyeHeight(mc.player.getPose()) + lookDirection.y * 0.5,
                         playerPos.z + lookDirection.z * 0.5
                     );
                 } else {
-                    // Third person: use normal eye position
-                    startPos = new Vec3d(
+                    startPos = new Vec3(
                         playerPos.x,
                         playerPos.y + mc.player.getEyeHeight(mc.player.getPose()),
                         playerPos.z

@@ -6,11 +6,11 @@ import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.screen.ingame.InventoryScreen;
-import net.minecraft.item.Items;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.screen.slot.SlotActionType;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.InventoryScreen;
+import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.Items;
 
 public class HoverTotem extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -64,55 +64,52 @@ public class HoverTotem extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null) return;
+        if (mc.player == null || mc.gameMode == null) return;
 
-        Screen currentScreen = mc.currentScreen;
+        Screen currentScreen = mc.screen;
         if (!(currentScreen instanceof InventoryScreen inventoryScreen)) {
             resetDelay();
             return;
         }
 
-        // Safely get focused slot with proper error handling
         Slot focusedSlot = getFocusedSlotSafe(inventoryScreen);
 
-        if (focusedSlot == null || focusedSlot.getIndex() > 35) return;
+        if (focusedSlot == null || focusedSlot.getContainerSlot() > 35) return;
 
         if (autoSwitchToTotem.get()) {
             mc.player.getInventory().setSelectedSlot(hotbarSlot.get() - 1);
         }
 
-        if (!focusedSlot.getStack().isOf(Items.TOTEM_OF_UNDYING)) return;
+        if (!focusedSlot.getItem().is(Items.TOTEM_OF_UNDYING)) return;
 
         if (remainingDelay > 0) {
             remainingDelay--;
             return;
         }
 
-        int slotIndex = focusedSlot.getIndex();
-        int syncId = inventoryScreen.getScreenHandler().syncId;
+        int slotIndex = focusedSlot.getContainerSlot();
+        int syncId = inventoryScreen.getMenu().containerId;
 
-        // Equip totem in offhand if not already there
-        if (!mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING)) {
+        if (!mc.player.getOffhandItem().is(Items.TOTEM_OF_UNDYING)) {
             equipOffhandTotem(syncId, slotIndex);
             return;
         }
 
-        // Equip totem in hotbar if enabled and not already there
         if (hotbarTotem.get()) {
             int hotbarIndex = hotbarSlot.get() - 1;
-            if (!mc.player.getInventory().getStack(hotbarIndex).isOf(Items.TOTEM_OF_UNDYING)) {
+            if (!mc.player.getInventory().getItem(hotbarIndex).is(Items.TOTEM_OF_UNDYING)) {
                 equipHotbarTotem(syncId, slotIndex, hotbarIndex);
             }
         }
     }
 
     private void equipOffhandTotem(int syncId, int slotIndex) {
-        mc.interactionManager.clickSlot(syncId, slotIndex, 40, SlotActionType.SWAP, mc.player);
+        mc.gameMode.handleInventoryMouseClick(syncId, slotIndex, 40, ClickType.SWAP, mc.player);
         resetDelay();
     }
 
     private void equipHotbarTotem(int syncId, int slotIndex, int hotbarIndex) {
-        mc.interactionManager.clickSlot(syncId, slotIndex, hotbarIndex, SlotActionType.SWAP, mc.player);
+        mc.gameMode.handleInventoryMouseClick(syncId, slotIndex, hotbarIndex, ClickType.SWAP, mc.player);
         resetDelay();
     }
 
@@ -120,41 +117,12 @@ public class HoverTotem extends Module {
         remainingDelay = tickDelay.get();
     }
 
+    // mixin always hits so the old reflection fallback never ran, and it checked the wrong class anyway
     private Slot getFocusedSlotSafe(InventoryScreen screen) {
-        try {
-            // Try using the mixin first
-            if (screen instanceof HandledScreenMixin mixin) {
-                return mixin.glazed$getFocusedSlot();
-            }
-
-            // Fallback to reflection
-            return getFocusedSlotReflection(screen);
-        } catch (Exception e) {
-            // If everything fails, return null
-            return null;
+        if (screen instanceof HandledScreenMixin mixin) {
+            return mixin.glazed$getFocusedSlot();
         }
-    }
 
-    private Slot getFocusedSlotReflection(InventoryScreen screen) {
-        try {
-            // Try multiple possible field names for different mappings
-            String[] fieldNames = {"focusedSlot", "field_7528", "f_96807_"};
-
-            Class<?> handledScreenClass = screen.getClass().getSuperclass();
-
-            for (String fieldName : fieldNames) {
-                try {
-                    java.lang.reflect.Field field = handledScreenClass.getDeclaredField(fieldName);
-                    field.setAccessible(true);
-                    return (Slot) field.get(screen);
-                } catch (NoSuchFieldException ignored) {
-                    // Try next field name
-                }
-            }
-
-            return null;
-        } catch (Exception e) {
-            return null;
-        }
+        return null;
     }
 }

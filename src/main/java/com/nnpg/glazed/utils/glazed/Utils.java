@@ -1,49 +1,72 @@
 package com.nnpg.glazed.utils.glazed;
 
-import net.minecraft.util.math.Vec3d;
 import org.joml.Vector3d;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URISyntaxException;
-import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import net.minecraft.world.phys.Vec3;
 
 public final class Utils {
 
+    private static final Logger LOG = LoggerFactory.getLogger("Glazed");
+
     public static File getCurrentJarPath() throws URISyntaxException {
-        return new File(Utils.class.getProtectionDomain().getCodeSource().getLocation().toURI().getPath());
+        // getPath() leaves %20 in there and breaks on any folder with a space
+        return Paths.get(Utils.class.getProtectionDomain().getCodeSource().getLocation().toURI()).toFile();
     }
 
-    public static void overwriteFile(String urlString, File targetFile) {
+    // https only. only overwrites the file if the whole download worked
+    public static boolean overwriteFile(String urlString, File targetFile) {
+        HttpURLConnection connection = null;
+        Path temp = null;
         try {
-            URL url = new URL(urlString);
-            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            URI uri = URI.create(urlString);
+            if (!"https".equalsIgnoreCase(uri.getScheme())) {
+                LOG.error("Refusing to download over a non-HTTPS URL: {}", uri.getScheme());
+                return false;
+            }
+
+            connection = (HttpURLConnection) uri.toURL().openConnection();
             connection.setRequestMethod("GET");
             connection.setConnectTimeout(5000);
             connection.setReadTimeout(10000);
+            connection.setInstanceFollowRedirects(true);
 
-            try (InputStream inputStream = connection.getInputStream();
-                 FileOutputStream outputStream = new FileOutputStream(targetFile)) {
-
-                byte[] buffer = new byte[1024];
-                int bytesRead;
-
-                while ((bytesRead = inputStream.read(buffer)) != -1) {
-                    outputStream.write(buffer, 0, bytesRead);
-                }
-
-                outputStream.flush();
+            int status = connection.getResponseCode();
+            if (status != HttpURLConnection.HTTP_OK) {
+                LOG.error("Download failed with HTTP {}", status);
+                return false;
             }
 
-            connection.disconnect();
+            // temp file first so a failed download cant leave a half written jar
+            temp = Files.createTempFile("glazed-download", ".tmp");
+            try (InputStream inputStream = connection.getInputStream()) {
+                Files.copy(inputStream, temp, StandardCopyOption.REPLACE_EXISTING);
+            }
+
+            Files.move(temp, targetFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            temp = null;
+            return true;
 
         } catch (Exception e) {
-            System.err.println("Error downloading file: " + e.getMessage());
-            e.printStackTrace();
+            LOG.error("Error downloading file", e);
+            return false;
+        } finally {
+            if (connection != null) connection.disconnect();
+            if (temp != null) try { Files.deleteIfExists(temp); } catch (IOException ignored) {}
         }
     }
 
-    public static void copyVector(Vector3d destination, Vec3d source) {
+    public static void copyVector(Vector3d destination, Vec3 source) {
         destination.x = source.x;
         destination.y = source.y;
         destination.z = source.z;
@@ -55,12 +78,12 @@ public final class Utils {
         destination.z = source.z;
     }
 
-    public static Vector3d toVector3d(Vec3d vec3d) {
+    public static Vector3d toVector3d(Vec3 vec3d) {
         return new Vector3d(vec3d.x, vec3d.y, vec3d.z);
     }
 
-    public static Vec3d toVec3d(Vector3d vector3d) {
-        return new Vec3d(vector3d.x, vector3d.y, vector3d.z);
+    public static Vec3 toVec3d(Vector3d vector3d) {
+        return new Vec3(vector3d.x, vector3d.y, vector3d.z);
     }
 
     public static double lerp(double start, double end, double progress) {

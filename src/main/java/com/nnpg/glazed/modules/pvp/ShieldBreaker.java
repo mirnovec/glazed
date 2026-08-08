@@ -7,18 +7,17 @@ import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import com.nnpg.glazed.GlazedAddon;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.AxeItem;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.EntityHitResult;
-import net.minecraft.util.hit.HitResult;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.AxeItem;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.phys.EntityHitResult;
+import net.minecraft.world.phys.HitResult;
 
 public class ShieldBreaker extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     
-    // Settings
     private final Setting<Boolean> autoBreak = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-break")
         .description("Automatically break shields without requiring clicks")
@@ -127,8 +126,7 @@ public class ShieldBreaker extends Module {
         .build()
     );
 
-    // State variables
-    private PlayerEntity targetPlayer = null;
+    private Player targetPlayer = null;
     private int originalSlot = -1;
     private int tickCounter = 0;
     private ShieldBreakerState state = ShieldBreakerState.IDLE;
@@ -138,11 +136,11 @@ public class ShieldBreaker extends Module {
         private int cooldownTicks = 0;
     
     private enum ShieldBreakerState {
-        IDLE,           // Waiting for shield detection
-        SWITCHING_AXE,  // Switching to axe
-        BREAKING,       // Breaking shield with axe
-        SWITCHING_BACK, // Switching back to weapon
-        KILLING         // Final kill attack
+        IDLE,
+        SWITCHING_AXE,
+        BREAKING,
+        SWITCHING_BACK,
+        KILLING
     }
 
     public ShieldBreaker() {
@@ -162,13 +160,11 @@ public class ShieldBreaker extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null || mc.gameMode == null) return;
 
-        // Don't activate if player is eating or using shield
         if (mc.player.isUsingItem()) return;
 
         if (autoBreak.get()) {
-                // Wait for cooldown before restarting cycle
                 if (cooldownTicks > 0) {
                     cooldownTicks--;
                     return;
@@ -181,41 +177,33 @@ public class ShieldBreaker extends Module {
                 case KILLING -> handleKillAttack();
             }
         } else {
-            // Manual mode - just check for shield users
             checkForShieldUser();
         }
     }
 
     private void checkForShieldUser() {
-        // Check what we're looking at
-        if (mc.crosshairTarget == null || mc.crosshairTarget.getType() != HitResult.Type.ENTITY) {
+        if (mc.hitResult == null || mc.hitResult.getType() != HitResult.Type.ENTITY) {
             return;
         }
 
-        EntityHitResult entityHit = (EntityHitResult) mc.crosshairTarget;
+        EntityHitResult entityHit = (EntityHitResult) mc.hitResult;
         
-        // Only target players if setting enabled
-        if (onlyPlayers.get() && !(entityHit.getEntity() instanceof PlayerEntity)) {
+        if (onlyPlayers.get() && !(entityHit.getEntity() instanceof Player)) {
             return;
         }
         
-        if (entityHit.getEntity() instanceof PlayerEntity player) {
-            // Check if player is within range
+        if (entityHit.getEntity() instanceof Player player) {
             if (mc.player.distanceTo(player) > range.get()) {
                 return;
             }
             
-            // Check if player is using a shield
             if (isUsingShield(player)) {
                 targetPlayer = player;
-                boolean isAttacking = mc.options.attackKey.isPressed();
+                boolean isAttacking = mc.options.keyAttack.isDown();
 
                 if (!autoBreak.get() && isAttacking) {
-                    // Manual mode - Store current slot FIRST before any swaps
-                    // PlayerInventory no longer exposes getSelectedSlot(); use the selectedSlot field instead
                     originalSlot = com.nnpg.glazed.utils.InventoryUtils.getSelectedSlot(mc.player.getInventory());
 
-                    // Find axe in hotbar
                     FindItemResult axeResult = InvUtils.findInHotbar(itemStack -> itemStack.getItem() instanceof AxeItem);
                     
                     if (!axeResult.found()) {
@@ -225,19 +213,15 @@ public class ShieldBreaker extends Module {
 
                     if (chatInfo.get()) info("Shield detected! Breaking with axe");
                     
-                    // Switch to axe, attack, and prepare to switch back
                     InvUtils.swap(axeResult.slot(), false);
-                    mc.interactionManager.attackEntity(mc.player, player);
-                    mc.player.swingHand(Hand.MAIN_HAND);
+                    mc.gameMode.attack(mc.player, player);
+                    mc.player.swing(InteractionHand.MAIN_HAND);
                     
-                    // Small delay before switching back (2 ticks)
                     tickCounter = 0;
                     state = ShieldBreakerState.BREAKING;
 
                 } else if (autoBreak.get()) {
-                    // Auto mode - use state machine
                     if (originalSlot == -1) {
-                        // PlayerInventory no longer exposes getSelectedSlot(); use the selectedSlot field instead
                         originalSlot = com.nnpg.glazed.utils.InventoryUtils.getSelectedSlot(mc.player.getInventory());
                     }
                     
@@ -260,16 +244,12 @@ public class ShieldBreaker extends Module {
     private void handleAxeSwitch() {
         tickCounter++;
         
-        // Small delay to ensure switch completed
         if (tickCounter >= axeSwitchDelay.get()) {
-            // Only attempt break if we haven't already broken the shield
             if (!shieldBroken) {
-                // Reduced cooldown for faster response while preventing double breaks
                 long currentTime = System.currentTimeMillis();
-                if (currentTime - lastBreakAttempt > 150) { // Reduced to 150ms cooldown
-                    // Attack to break shield
-                    mc.interactionManager.attackEntity(mc.player, targetPlayer);
-                    mc.player.swingHand(Hand.MAIN_HAND);
+                if (currentTime - lastBreakAttempt > 150) {
+                    mc.gameMode.attack(mc.player, targetPlayer);
+                    mc.player.swing(InteractionHand.MAIN_HAND);
                     lastBreakAttempt = currentTime;
                     shieldBroken = true;
                     
@@ -285,25 +265,20 @@ public class ShieldBreaker extends Module {
     private void handleShieldBreak() {
         tickCounter++;
         
-        // Immediately proceed if shield is broken
         if (shieldBroken) {
-            // Always return to original slot in manual mode
             if (!autoBreak.get()) {
                 if (originalSlot != -1) {
-                    // Switch back to original slot
                     InvUtils.swap(originalSlot, false);
                     
-                    // Attack with original weapon
                     if (targetPlayer != null && !targetPlayer.isRemoved() && mc.player.distanceTo(targetPlayer) <= range.get()) {
-                        mc.interactionManager.attackEntity(mc.player, targetPlayer);
-                        mc.player.swingHand(Hand.MAIN_HAND);
+                        mc.gameMode.attack(mc.player, targetPlayer);
+                        mc.player.swing(InteractionHand.MAIN_HAND);
                         if (chatInfo.get()) info("Attacking with original weapon!");
                     }
                     resetState();
                     return;
                 }
             } else {
-                // Auto mode behavior - switch immediately after break
                 if (returnToPrevSlot.get()) {
                     if (originalSlot != -1) {
                         InvUtils.swap(originalSlot, false);
@@ -316,8 +291,7 @@ public class ShieldBreaker extends Module {
                 tickCounter = 0;
             }
         } else {
-            // If shield isn't broken yet, wait a bit then reset if taking too long
-            if (tickCounter >= 3) { // Reduced timeout for faster retry
+            if (tickCounter >= 3) {
                 if (chatInfo.get()) error("Shield break failed, retrying...");
                 state = ShieldBreakerState.IDLE;
                 tickCounter = 0;
@@ -328,7 +302,6 @@ public class ShieldBreaker extends Module {
     private void handleWeaponSwitch() {
         tickCounter++;
         
-        // Small delay to ensure weapon switch completed
         if (tickCounter >= weaponSwitchDelay.get()) {
             state = ShieldBreakerState.KILLING;
             tickCounter = 0;
@@ -338,14 +311,11 @@ public class ShieldBreaker extends Module {
     private void handleKillAttack() {
         tickCounter++;
         
-        // Wait for kill delay then attack
         if (tickCounter >= killDelay.get()) {
-            // Only execute kill attack if kill switch is enabled
             if (killSwitch.get()) {
-                // Simplified but safe target validation
-                if (targetPlayer != null && !targetPlayer.isRemoved()) { // Removed redundant range check
-                    mc.interactionManager.attackEntity(mc.player, targetPlayer);
-                    mc.player.swingHand(Hand.MAIN_HAND);
+                if (targetPlayer != null && !targetPlayer.isRemoved()) {
+                    mc.gameMode.attack(mc.player, targetPlayer);
+                    mc.player.swing(InteractionHand.MAIN_HAND);
                     
                     if (chatInfo.get()) info("Kill attack executed!");
                 }
@@ -353,53 +323,43 @@ public class ShieldBreaker extends Module {
                 info("Shield broken - Kill switch disabled");
             }
             
-            // Reset to idle state
             resetState();
             cooldownTicks = cycleCooldown.get();
         }
     }
 
-    private boolean isUsingShield(PlayerEntity player) {
-        // First check if we're behind the player
+    private boolean isUsingShield(Player player) {
         if (isPlayerBehindTarget(mc.player, player)) {
             if (chatInfo.get()) info("Cannot break shield from behind!");
             return false;
         }
 
-        // Check main hand
-        ItemStack mainHand = player.getMainHandStack();
-        if (mainHand.getItem() == Items.SHIELD && player.isUsingItem() && player.getActiveHand() == Hand.MAIN_HAND) {
+        ItemStack mainHand = player.getMainHandItem();
+        if (mainHand.getItem() == Items.SHIELD && player.isUsingItem() && player.getUsedItemHand() == InteractionHand.MAIN_HAND) {
             return true;
         }
         
-        // Check offhand  
-        ItemStack offHand = player.getOffHandStack();
-        if (offHand.getItem() == Items.SHIELD && player.isUsingItem() && player.getActiveHand() == Hand.OFF_HAND) {
+        ItemStack offHand = player.getOffhandItem();
+        if (offHand.getItem() == Items.SHIELD && player.isUsingItem() && player.getUsedItemHand() == InteractionHand.OFF_HAND) {
             return true;
         }
         
         return false;
     }
 
-    private boolean isPlayerBehindTarget(PlayerEntity source, PlayerEntity target) {
-        // Get the angle between the target's looking direction and the vector to the source
+    private boolean isPlayerBehindTarget(Player source, Player target) {
         double dx = source.getX() - target.getX();
         double dz = source.getZ() - target.getZ();
         
-        // Calculate the angle between the target's looking direction and the vector to the source
         double angle = Math.toDegrees(Math.atan2(dz, dx));
         
-        // Normalize the target's yaw to 0-360
-        float targetYaw = target.getYaw() % 360;
+        float targetYaw = target.getYRot() % 360;
         if (targetYaw < 0) targetYaw += 360;
         
-        // Normalize the calculated angle to 0-360
         if (angle < 0) angle += 360;
         
-        // Calculate the absolute difference between angles
         double angleDiff = Math.abs(angle - targetYaw);
         
-        // Consider "behind" if the angle difference is less than 90 degrees
         return angleDiff < 90 || angleDiff > 270;
     }
 
@@ -410,7 +370,6 @@ public class ShieldBreaker extends Module {
         state = ShieldBreakerState.IDLE;
         shieldBroken = false;
         lastBreakAttempt = 0;
-            // cooldownTicks is set in handleKillAttack
     }
 
     @Override

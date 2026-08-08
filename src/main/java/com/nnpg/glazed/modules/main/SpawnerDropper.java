@@ -8,14 +8,14 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.gui.screen.ingame.HandledScreen;
-import net.minecraft.item.Items;
-import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 
 public class SpawnerDropper extends Module {
 
@@ -68,10 +68,10 @@ public class SpawnerDropper extends Module {
         super(GlazedAddon.CATEGORY, "spawner-dropper", "Drops all items from spawners");
     }
 
-    private boolean hasArrowsInInventory(HandledScreen<?> screen) {
+    private boolean hasArrowsInInventory(AbstractContainerScreen<?> screen) {
         for (int i = 0; i <= 44; i++) {
-            if (!screen.getScreenHandler().getSlot(i).getStack().isEmpty() &&
-                screen.getScreenHandler().getSlot(i).getStack().getItem() == Items.ARROW) {
+            if (!screen.getMenu().getSlot(i).getItem().isEmpty() &&
+                screen.getMenu().getSlot(i).getItem().getItem() == Items.ARROW) {
                 return true;
             }
         }
@@ -79,14 +79,14 @@ public class SpawnerDropper extends Module {
     }
 
     private BlockPos findNearbySpawner() {
-        if (mc.player == null || mc.world == null) return null;
+        if (mc.player == null || mc.level == null) return null;
 
-        BlockPos playerPos = mc.player.getBlockPos();
+        BlockPos playerPos = mc.player.blockPosition();
         for (int x = -6; x <= 6; x++) {
             for (int y = -6; y <= 6; y++) {
                 for (int z = -6; z <= 6; z++) {
-                    BlockPos pos = playerPos.add(x, y, z);
-                    if (mc.world.getBlockState(pos).getBlock() == net.minecraft.block.Blocks.SPAWNER) {
+                    BlockPos pos = playerPos.offset(x, y, z);
+                    if (mc.level.getBlockState(pos).getBlock() == net.minecraft.world.level.block.Blocks.SPAWNER) {
                         return pos;
                     }
                 }
@@ -100,14 +100,14 @@ public class SpawnerDropper extends Module {
             spawnerPos = findNearbySpawner();
         }
 
-        if (spawnerPos != null && mc.interactionManager != null && mc.player != null) {
+        if (spawnerPos != null && mc.gameMode != null && mc.player != null) {
             BlockHitResult hitResult = new BlockHitResult(
-                Vec3d.ofCenter(spawnerPos),
+                Vec3.atCenterOf(spawnerPos),
                 Direction.UP,
                 spawnerPos,
                 false
             );
-            mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hitResult);
+            mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, hitResult);
             currentStep = 0;
             checkDelayCounter = 0;
             tickCounter = 0;
@@ -117,9 +117,8 @@ public class SpawnerDropper extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.interactionManager == null || mc.world == null) return;
+        if (mc.player == null || mc.gameMode == null || mc.level == null) return;
 
-        // Autodetect spawner if not found
         if (spawnerPos == null) {
             spawnerPos = findNearbySpawner();
             if (spawnerPos != null) {
@@ -127,11 +126,10 @@ public class SpawnerDropper extends Module {
             }
         }
 
-        // Handle auto-reopen timer
         reopenTimer++;
-        int reopenIntervalTicks = autoReopenInterval.get() * 60 * 20; // minutes to ticks
+        int reopenIntervalTicks = autoReopenInterval.get() * 60 * 20;
 
-        // If waiting for interval just count and wait ty
+        // just count and wait ty
         if (waitingForInterval) {
             if (reopenTimer >= reopenIntervalTicks) {
                 if (notifications.get()) info("Interval reached - opening spawner.");
@@ -141,8 +139,7 @@ public class SpawnerDropper extends Module {
             return;
         }
 
-        // Auto-open spawner at interval if no screen is open 
-        if (!(mc.currentScreen instanceof HandledScreen)) {
+        if (!(mc.screen instanceof AbstractContainerScreen)) {
             if (reopenTimer >= reopenIntervalTicks || reopenTimer == 20) {
                 if (spawnerPos != null) {
                     openSpawner();
@@ -152,24 +149,23 @@ public class SpawnerDropper extends Module {
             return;
         }
 
-        HandledScreen<?> screen = (HandledScreen<?>) mc.currentScreen;
+        AbstractContainerScreen<?> screen = (AbstractContainerScreen<?>) mc.screen;
 
-        // Check for arrows if found close and wait for interval sigma
+        // arrows found, close and wait for interval sigma
         if (boneOnly.get() && hasArrowsInInventory(screen)) {
             if (notifications.get()) info("Arrows detected - closing spawner and waiting for interval.");
-            mc.currentScreen.close();
+            mc.screen.onClose();
             waitingForInterval = true;
             reopenTimer = 0;
             return;
         }
 
-        // Check delay steps
         if (currentStep == 2 || currentStep == 5) {
             checkDelayCounter++;
             if (checkDelayCounter >= CHECK_DELAY) {
-                if (screen.getScreenHandler().getSlot(0).getStack().isEmpty()) {
+                if (screen.getMenu().getSlot(0).getItem().isEmpty()) {
                     if (notifications.get()) info("All bones dropped - closing and waiting for interval.");
-                    mc.currentScreen.close();
+                    mc.screen.onClose();
                     waitingForInterval = true;
                     reopenTimer = 0;
                     return;
@@ -185,7 +181,6 @@ public class SpawnerDropper extends Module {
             return;
         }
 
-        // Click delay
         tickCounter++;
         if (tickCounter < delay.get()) {
             return;
@@ -193,23 +188,22 @@ public class SpawnerDropper extends Module {
 
         tickCounter = 0;
 
-        // Execute clicks
         switch (currentStep) {
             case 0:
-                mc.interactionManager.clickSlot(screen.getScreenHandler().syncId, 50, 0, SlotActionType.PICKUP, mc.player);
+                mc.gameMode.handleInventoryMouseClick(screen.getMenu().containerId, 50, 0, ClickType.PICKUP, mc.player);
                 currentStep = 1;
                 break;
             case 1:
-                mc.interactionManager.clickSlot(screen.getScreenHandler().syncId, 53, 0, SlotActionType.PICKUP, mc.player);
+                mc.gameMode.handleInventoryMouseClick(screen.getMenu().containerId, 53, 0, ClickType.PICKUP, mc.player);
                 currentStep = 2;
                 checkDelayCounter = 0;
                 break;
             case 3:
-                mc.interactionManager.clickSlot(screen.getScreenHandler().syncId, 50, 0, SlotActionType.PICKUP, mc.player);
+                mc.gameMode.handleInventoryMouseClick(screen.getMenu().containerId, 50, 0, ClickType.PICKUP, mc.player);
                 currentStep = 4;
                 break;
             case 4:
-                mc.interactionManager.clickSlot(screen.getScreenHandler().syncId, 53, 0, SlotActionType.PICKUP, mc.player);
+                mc.gameMode.handleInventoryMouseClick(screen.getMenu().containerId, 53, 0, ClickType.PICKUP, mc.player);
                 currentStep = 5;
                 checkDelayCounter = 0;
                 break;
@@ -234,7 +228,7 @@ public class SpawnerDropper extends Module {
         reopenTimer = 0;
         spawnerPos = null;
         waitingForInterval = false;
-        if (mc.currentScreen != null) {
+        if (mc.screen != null) {
             mc.setScreen(null);
         }
     }

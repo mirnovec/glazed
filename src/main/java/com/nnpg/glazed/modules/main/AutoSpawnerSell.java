@@ -1,23 +1,22 @@
 package com.nnpg.glazed.modules.main;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import com.nnpg.glazed.GlazedAddon;
+import com.nnpg.glazed.utils.GlazedSell;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.core.NonNullList;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.ChestMenu;
+import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import meteordevelopment.meteorclient.events.world.TickEvent;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.util.InputUtil;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.screen.GenericContainerScreenHandler;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.util.collection.DefaultedList;
 
 public class AutoSpawnerSell extends Module {
-    private final MinecraftClient mc = MinecraftClient.getInstance();
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
 
@@ -60,14 +59,14 @@ public class AutoSpawnerSell extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null) return;
+        if (mc.player == null || mc.gameMode == null) return;
 
         if (delayCounter > 0) {
             delayCounter--;
             return;
         }
 
-        ScreenHandler handler = mc.player.currentScreenHandler;
+        AbstractContainerMenu handler = mc.player.containerMenu;
 
         if (pageCounter >= pageAmount.get()) {
             isSelling = true;
@@ -83,40 +82,39 @@ public class AutoSpawnerSell extends Module {
         }
     }
 
-    private void handleSelling(ScreenHandler handler) {
-        if (!(handler instanceof GenericContainerScreenHandler)) {
-            mc.getNetworkHandler().sendChatCommand("order " + getOrderCommand());
+    // no ordering any more. open /sell, shove everything in, confirm, close
+    private void handleSelling(AbstractContainerMenu handler) {
+        if (!(handler instanceof ChestMenu container)) {
+            GlazedSell.openSell();
             delayCounter = 20;
             return;
         }
 
-        GenericContainerScreenHandler container = (GenericContainerScreenHandler) handler;
-
-        if (container.getRows() == 6) {
-            ItemStack stack = container.getSlot(47).getStack();
-            if (stack.isEmpty()) {
-                delayCounter = 2;
-                mc.player.closeHandledScreen();
-                return;
-            }
-
-            mc.interactionManager.clickSlot(handler.syncId, 47, 1, SlotActionType.QUICK_MOVE, mc.player);
-            delayCounter = 5;
+        // the confirm can be a green pane or a Yes/No screen, and it asks twice
+        if (GlazedSell.clickConfirm(container)) {
+            delayCounter = 10;
             return;
         }
 
-        mc.player.closeHandledScreen();
+        if (GlazedSell.depositNext(container)) {
+            delayCounter = 3;
+            return;
+        }
+
+        // nothing left to put in and nothing to confirm, we're done
+        GlazedSell.close();
+        isSelling = false;
         delayCounter = 20;
     }
 
-    private void handleDropping(ScreenHandler handler) {
-        if (!(handler instanceof GenericContainerScreenHandler)) {
-            KeyBinding.onKeyPressed(InputUtil.Type.MOUSE.createFromCode(1));
+    private void handleDropping(AbstractContainerMenu handler) {
+        if (!(handler instanceof ChestMenu)) {
+            KeyMapping.click(InputConstants.Type.MOUSE.getOrCreate(1));
             delayCounter = 20;
             return;
         }
 
-        DefaultedList<ItemStack> stacks = handler.getStacks();
+        NonNullList<ItemStack> stacks = handler.getItems();
         boolean allBones = true;
 
         for (ItemStack stack : stacks) {
@@ -127,13 +125,13 @@ public class AutoSpawnerSell extends Module {
         }
 
         if (allBones) {
-            mc.interactionManager.clickSlot(handler.syncId, 52, 1, SlotActionType.THROW, mc.player);
+            mc.gameMode.handleInventoryMouseClick(handler.containerId, 52, 1, ClickType.THROW, mc.player);
             isProcessing = true;
             delayCounter = pageSwitchDelay.get();
             pageCounter++;
         } else if (isProcessing) {
             isProcessing = false;
-            mc.interactionManager.clickSlot(handler.syncId, 50, 0, SlotActionType.PICKUP, mc.player);
+            mc.gameMode.handleInventoryMouseClick(handler.containerId, 50, 0, ClickType.PICKUP, mc.player);
             delayCounter = 20;
         } else {
             isProcessing = false;
@@ -143,14 +141,14 @@ public class AutoSpawnerSell extends Module {
                 delayCounter = 40;
                 return;
             }
-            mc.interactionManager.clickSlot(handler.syncId, 45, 1, SlotActionType.THROW, mc.player);
+            mc.gameMode.handleInventoryMouseClick(handler.containerId, 45, 1, ClickType.THROW, mc.player);
             delayCounter = dropDelay.get();
         }
     }
 
     private Item getInventoryItem() {
-        for (int i = 0; i < mc.player.getInventory().size(); i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+        for (int i = 0; i < mc.player.getInventory().getContainerSize(); i++) {
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (!stack.isEmpty()) return stack.getItem();
         }
         return Items.AIR;

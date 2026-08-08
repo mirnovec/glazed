@@ -7,10 +7,10 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.item.ItemStack;
-import net.minecraft.screen.GenericContainerScreenHandler;
-import net.minecraft.screen.ShulkerBoxScreenHandler;
-import net.minecraft.screen.slot.SlotActionType;
+import net.minecraft.world.inventory.ChestMenu;
+import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.inventory.ShulkerBoxMenu;
+import net.minecraft.world.item.ItemStack;
 
 public class ChestAndShulkerStealer extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -27,6 +27,10 @@ public class ChestAndShulkerStealer extends Module {
     private int tickCounter = 0;
     private int currentSlot = 0;
 
+    // syncId changes per container. without this the next chest carried on from the old slot
+    // and skipped everything before it
+    private int activeSyncId = -1;
+
     public ChestAndShulkerStealer() {
         super(GlazedAddon.CATEGORY, "storage-stealer", "Steals items from chests and shulkers.");
     }
@@ -35,33 +39,39 @@ public class ChestAndShulkerStealer extends Module {
     public void onActivate() {
         tickCounter = 0;
         currentSlot = 0;
+        activeSyncId = -1;
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.currentScreen == null) return;
+        if (mc.player == null || mc.gameMode == null || mc.screen == null) return;
 
         int containerSize = 0;
 
-        if (mc.player.currentScreenHandler instanceof ShulkerBoxScreenHandler) {
+        if (mc.player.containerMenu instanceof ShulkerBoxMenu) {
             containerSize = 27;
-        } else if (mc.player.currentScreenHandler instanceof GenericContainerScreenHandler handler) {
-            containerSize = handler.getInventory().size();
+        } else if (mc.player.containerMenu instanceof ChestMenu handler) {
+            containerSize = handler.getContainer().getContainerSize();
         } else {
             return;
+        }
+
+        if (mc.player.containerMenu.containerId != activeSyncId) {
+            activeSyncId = mc.player.containerMenu.containerId;
+            currentSlot = 0;
         }
 
         if (++tickCounter < Math.max(1, delay.get())) return;
         tickCounter = 0;
 
         while (currentSlot < containerSize) {
-            ItemStack stack = mc.player.currentScreenHandler.getSlot(currentSlot).getStack();
+            ItemStack stack = mc.player.containerMenu.getSlot(currentSlot).getItem();
             if (!stack.isEmpty()) {
-                mc.interactionManager.clickSlot(
-                    mc.player.currentScreenHandler.syncId,
+                mc.gameMode.handleInventoryMouseClick(
+                    mc.player.containerMenu.containerId,
                     currentSlot,
                     0,
-                    SlotActionType.QUICK_MOVE,
+                    ClickType.QUICK_MOVE,
                     mc.player
                 );
                 currentSlot++;

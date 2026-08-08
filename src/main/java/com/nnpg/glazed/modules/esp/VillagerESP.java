@@ -1,7 +1,8 @@
 package com.nnpg.glazed.modules.esp;
 
+import com.nnpg.glazed.utils.GlazedWebhook;
 import com.nnpg.glazed.GlazedAddon;
-import com.nnpg.glazed.VersionUtil; // For 1.21.4 - change to VersionUtil2 for 1.21.5
+import com.nnpg.glazed.VersionUtil;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -10,27 +11,18 @@ import meteordevelopment.meteorclient.utils.render.RenderUtils;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.entity.passive.VillagerEntity;
-import net.minecraft.entity.mob.ZombieVillagerEntity;
-import net.minecraft.item.Items;
-import net.minecraft.text.Text;
-
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.monster.zombie.ZombieVillager;
+import net.minecraft.world.entity.npc.villager.Villager;
+import net.minecraft.world.item.Items;
 import java.util.HashSet;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 
 public class VillagerESP extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgRender = settings.createGroup("Render");
     private final SettingGroup sgwebhook = settings.createGroup("Webhook");
 
-    // General settings
     private final Setting<DetectionMode> detectionMode = sgGeneral.add(new EnumSetting.Builder<DetectionMode>()
         .name("Detection Mode")
         .description("What type of villagers to detect")
@@ -38,7 +30,6 @@ public class VillagerESP extends Module {
         .build()
     );
 
-    // Render settings
     private final Setting<Boolean> showTracers = sgRender.add(new BoolSetting.Builder()
         .name("Show Tracers")
         .description("Draw tracer lines to villagers")
@@ -117,9 +108,6 @@ public class VillagerESP extends Module {
     private final Setting<Boolean> notifications = sgGeneral.add(new BoolSetting.Builder().name("notifications").description("Show chat feedback.").defaultValue(true).build());
 
     private final Set<Integer> detectedVillagers = new HashSet<>();
-    private final HttpClient httpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .build();
 
     public VillagerESP() {
         super(GlazedAddon.esp, "villager-esp", "Detects villagers and zombie villagers in the world");
@@ -127,22 +115,21 @@ public class VillagerESP extends Module {
 
     @EventHandler
     private void onRender3D(Render3DEvent event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
 
         Set<Integer> currentVillagers = new HashSet<>();
         int villagerCount = 0;
         int zombieVillagerCount = 0;
 
-        // Find all villagers in the world
-        for (net.minecraft.entity.Entity entity : mc.world.getEntities()) {
+        for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
             boolean shouldDetect = false;
             Color tracerColor = null;
 
-            if (entity instanceof VillagerEntity && (detectionMode.get() == DetectionMode.Villagers || detectionMode.get() == DetectionMode.Both)) {
+            if (entity instanceof Villager && (detectionMode.get() == DetectionMode.Villagers || detectionMode.get() == DetectionMode.Both)) {
                 shouldDetect = true;
                 tracerColor = new Color(villagerTracerColor.get());
                 villagerCount++;
-            } else if (entity instanceof ZombieVillagerEntity && (detectionMode.get() == DetectionMode.ZombieVillagers || detectionMode.get() == DetectionMode.Both)) {
+            } else if (entity instanceof ZombieVillager && (detectionMode.get() == DetectionMode.ZombieVillagers || detectionMode.get() == DetectionMode.Both)) {
                 shouldDetect = true;
                 tracerColor = new Color(zombieVillagerTracerColor.get());
                 zombieVillagerCount++;
@@ -151,14 +138,11 @@ public class VillagerESP extends Module {
             if (shouldDetect) {
                 currentVillagers.add(entity.getId());
 
-                // Draw tracers if enabled
                 if (showTracers.get()) {
-                    // Use VersionUtil for cross-version compatibility
                     double x = VersionUtil.getPrevX(entity) + (entity.getX() - VersionUtil.getPrevX(entity)) * event.tickDelta;
                     double y = VersionUtil.getPrevY(entity) + (entity.getY() - VersionUtil.getPrevY(entity)) * event.tickDelta;
                     double z = VersionUtil.getPrevZ(entity) + (entity.getZ() - VersionUtil.getPrevZ(entity)) * event.tickDelta;
 
-                    // Target the center/body of the villager
                     double height = entity.getBoundingBox().maxY - entity.getBoundingBox().minY;
                     y += height / 2;
 
@@ -167,7 +151,6 @@ public class VillagerESP extends Module {
             }
         }
 
-        // Check if we found new villagers
         if (!currentVillagers.isEmpty() && !currentVillagers.equals(detectedVillagers)) {
             Set<Integer> newVillagers = new HashSet<>(currentVillagers);
             newVillagers.removeAll(detectedVillagers);
@@ -186,10 +169,10 @@ public class VillagerESP extends Module {
 
         switch (notificationMode.get()) {
             case Chat -> { if (notifications.get()) info("(highlight)%s", message); }
-            case Toast -> mc.getToastManager().add(new MeteorToast.Builder(title).text(message).icon(Items.EMERALD).build());
+            case Toast -> mc.getToastManager().addToast(new MeteorToast.Builder(title).text(message).icon(Items.EMERALD).build());
             case Both -> {
                 if (notifications.get()) info("(highlight)%s", message);
-                mc.getToastManager().add(new MeteorToast.Builder(title).text(message).icon(Items.EMERALD).build());
+                mc.getToastManager().addToast(new MeteorToast.Builder(title).text(message).icon(Items.EMERALD).build());
             }
         }
 
@@ -214,7 +197,6 @@ public class VillagerESP extends Module {
         } else if (detectionMode.get() == DetectionMode.ZombieVillagers) {
             return zombieVillagerCount == 1 ? "Zombie villager detected!" : String.format("%d zombie villagers detected!", zombieVillagerCount);
         } else {
-            // Both mode
             if (villagerCount > 0 && zombieVillagerCount > 0) {
                 return String.format("%d villagers and %d zombie villagers detected!", villagerCount, zombieVillagerCount);
             } else if (villagerCount > 0) {
@@ -226,101 +208,46 @@ public class VillagerESP extends Module {
     }
 
     private void sendWebhookNotification(int villagerCount, int zombieVillagerCount) {
-        String url = webhookUrl.get().trim();
-        if (url.isEmpty()) {
+        if (webhookUrl.get().trim().isEmpty()) {
             if (notifications.get()) warning("Webhook URL not configured!");
             return;
         }
 
-        CompletableFuture.runAsync(() -> {
-            try {
-                String serverInfo = mc.getCurrentServerEntry() != null ?
-                    mc.getCurrentServerEntry().address : "Unknown Server";
+        String serverInfo = mc.getCurrentServer() != null ?
+            mc.getCurrentServer().ip : "Unknown Server";
 
-                String messageContent = "";
-                if (selfPing.get() && !discordId.get().trim().isEmpty()) {
-                    messageContent = String.format("<@%s>", discordId.get().trim());
-                }
+        String coordinates = "Unknown";
+        if (mc.player != null) {
+            coordinates = String.format("X: %.0f, Y: %.0f, Z: %.0f",
+                mc.player.getX(), mc.player.getY(), mc.player.getZ());
+        }
 
-                String description = buildDetectionMessage(villagerCount, zombieVillagerCount);
+        String avatar = "https://i.imgur.com/OL2y1cr.png";
 
-                // Get current coordinates
-                String coordinates = "Unknown";
-                if (mc.player != null) {
-                    coordinates = String.format("X: %.0f, Y: %.0f, Z: %.0f",
-                        mc.player.getX(), mc.player.getY(), mc.player.getZ());
-                }
+        GlazedWebhook.Builder webhook = GlazedWebhook.to(webhookUrl.get())
+            .username("VillagerESP")
+            .ping(selfPing.get() ? discordId.get() : null)
+            .title("🏘️ Villager Alert")
+            .description(buildDetectionMessage(villagerCount, zombieVillagerCount))
+            .color(65280)
+            .thumbnail(avatar)
+            .field("Server", serverInfo, true);
 
-                // Build fields based on what was detected
-                StringBuilder fieldsBuilder = new StringBuilder();
-                fieldsBuilder.append(String.format(
-                    "{\"name\":\"Server\",\"value\":\"%s\",\"inline\":true},",
-                    serverInfo.replace("\"", "\\\"")
-                ));
+        if (villagerCount > 0) webhook.field("Villagers", String.valueOf(villagerCount), true);
+        if (zombieVillagerCount > 0) webhook.field("Zombie Villagers", String.valueOf(zombieVillagerCount), true);
 
-                if (villagerCount > 0) {
-                    fieldsBuilder.append(String.format(
-                        "{\"name\":\"Villagers\",\"value\":\"%d\",\"inline\":true},",
-                        villagerCount
-                    ));
-                }
-
-                if (zombieVillagerCount > 0) {
-                    fieldsBuilder.append(String.format(
-                        "{\"name\":\"Zombie Villagers\",\"value\":\"%d\",\"inline\":true},",
-                        zombieVillagerCount
-                    ));
-                }
-
-                fieldsBuilder.append(String.format(
-                    "{\"name\":\"Coordinates\",\"value\":\"%s\",\"inline\":false}," +
-                        "{\"name\":\"Time\",\"value\":\"<t:%d:R>\",\"inline\":true}",
-                    coordinates.replace("\"", "\\\""),
-                    System.currentTimeMillis() / 1000
-                ));
-
-                String jsonPayload = String.format(
-                    "{\"content\":\"%s\"," +
-                        "\"username\":\"VillagerESP\"," +
-                        "\"avatar_url\":\"https://i.imgur.com/OL2y1cr.png\"," +
-                        "\"embeds\":[{" +
-                        "\"title\":\"🏘️ Villager Alert\"," +
-                        "\"description\":\"%s\"," +
-                        "\"color\":65280," +
-                        "\"thumbnail\":{\"url\":\"https://i.imgur.com/OL2y1cr.png\"}," +
-                        "\"fields\":[%s]," +
-                        "\"footer\":{\"text\":\"Sent by Glazed\"}" +
-                        "}]}",
-                    messageContent.replace("\"", "\\\""),
-                    description.replace("\"", "\\\""),
-                    fieldsBuilder.toString()
-                );
-
-                HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-                    .timeout(Duration.ofSeconds(30))
-                    .build();
-
-                HttpResponse<String> response = httpClient.send(request,
-                    HttpResponse.BodyHandlers.ofString());
-
-                if (response.statusCode() == 204) {
-                    if (notifications.get()) info("Webhook notification sent successfully");
-                } else {
-                    if (notifications.get()) error("Webhook failed with status: " + response.statusCode());
-                }
-
-            } catch (IOException | InterruptedException e) {
-                if (notifications.get()) error("Failed to send webhook: " + e.getMessage());
-            }
-        });
+        webhook
+            .field("Coordinates", coordinates, false)
+            .field("Time", "<t:" + (System.currentTimeMillis() / 1000) + ":R>", true)
+            .onError(message -> {
+                if (notifications.get()) error("Failed to send webhook: " + message);
+            })
+            .send();
     }
 
     private void disconnectFromServer(String reason) {
-        if (mc.world != null && mc.getNetworkHandler() != null) {
-            mc.getNetworkHandler().getConnection().disconnect(Text.literal(reason));
+        if (mc.level != null && mc.getConnection() != null) {
+            mc.getConnection().getConnection().disconnect(Component.literal(reason));
             if (notifications.get()) info("Disconnected from server - " + reason);
         }
     }

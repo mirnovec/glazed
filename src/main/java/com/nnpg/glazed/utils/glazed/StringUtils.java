@@ -1,87 +1,72 @@
 package com.nnpg.glazed.utils.glazed;
 
-public class StringUtils {
+import java.text.Normalizer;
+import java.util.Locale;
+import java.util.Map;
+
+public final class StringUtils {
+
+    // cyrillic/greek lookalikes, NFKD doesnt catch these.
+    // shoutout to whoever names themselves with 4 different alphabets to dodge a name check
+    private static final Map<Integer, Character> HOMOGLYPHS = buildHomoglyphs();
+
+    private StringUtils() {}
+
     public static String convertUnicodeToAscii(String text) {
-        StringBuilder result = new StringBuilder();
+        if (text == null || text.isEmpty()) return "";
 
-        for (char c : text.toCharArray()) {
-            switch (c) {
-                case 'ᴀ', 'а', 'α', 'ａ', 'А', 'Α', 'Ａ' -> result.append('a');
-                case 'ʙ', 'в', 'β', 'ｂ', 'В', 'Β', 'Ｂ' -> result.append('b');
-                case 'ᴄ', 'с', 'ｃ', 'С', 'Ｃ' -> result.append('c');
-                case 'ᴅ', 'ｄ', 'Ｄ' -> result.append('d');
-                case 'ᴇ', 'е', 'ε', 'ｅ', 'Е', 'Ε', 'Ｅ' -> result.append('e');
-                case 'ꜰ', 'ｆ', 'Ｆ' -> result.append('f');
-                case 'ɢ', 'ｇ', 'Ｇ' -> result.append('g');
-                case 'ʜ', 'н', 'ｈ', 'Н', 'Η', 'Ｈ' -> result.append('h');
-                case 'ɪ', 'і', 'ｉ', 'І', 'Ι', 'Ｉ' -> result.append('i');
-                case 'ᴊ', 'ј', 'ｊ', 'Ј', 'Ｊ' -> result.append('j');
-                case 'ᴋ', 'к', 'κ', 'ｋ', 'К', 'Κ', 'Ｋ' -> result.append('k');
-                case 'ʟ', 'ｌ', 'Ｌ' -> result.append('l');
-                case 'ᴍ', 'м', 'ｍ', 'М', 'Μ', 'Ｍ' -> result.append('m');
-                case 'ɴ', 'п', 'η', 'ｎ', 'П', 'Ｎ', 'Ν' -> result.append('n');
-                case 'ᴏ', 'о', 'ο', 'ｏ', 'О', 'Ο', 'Ｏ' -> result.append('o');
-                case 'ᴘ', 'р', 'ρ', 'ｐ', 'Р', 'Ρ', 'Ｐ' -> result.append('p');
-                case 'ꞯ', 'ǫ', 'ｑ', 'Ｑ' -> result.append('q');
-                case 'ʀ', 'ｒ', 'Ｒ' -> result.append('r');
-                case 'ꜱ', 'ѕ', 'ｓ', 'Ѕ', 'Ｓ' -> result.append('s');
-                case 'ᴛ', 'т', 'τ', 'ｔ', 'Т', 'Τ', 'Ｔ' -> result.append('t');
-                case 'ᴜ', 'υ', 'ｕ', 'Ｕ' -> result.append('u');
-                case 'ᴠ', 'ν', 'ｖ', 'Ｖ' -> result.append('v');
-                case 'ᴡ', 'ω', 'ｗ', 'Ｗ' -> result.append('w');
-                case 'x', 'х', 'χ', 'ｘ', 'Х', 'Χ', 'Ｘ' -> result.append('x');
-                case 'ʏ', 'у', 'Υ', 'ｙ', 'У', 'Ｙ' -> result.append('y');
-                case 'ᴢ', 'ｚ', 'Ζ', 'Ｚ' -> result.append('z');
+        // kills fullwidth and the fancy math letters people hide names with
+        String normalized = Normalizer.normalize(text, Normalizer.Form.NFKD);
 
-                case '０' -> result.append('0');
-                case '１' -> result.append('1');
-                case '２' -> result.append('2');
-                case '３' -> result.append('3');
-                case '４' -> result.append('4');
-                case '５' -> result.append('5');
-                case '６' -> result.append('6');
-                case '７' -> result.append('7');
-                case '８' -> result.append('8');
-                case '９' -> result.append('9');
+        StringBuilder result = new StringBuilder(normalized.length());
 
-                case '　' -> result.append(' ');
-                case '－' -> result.append('-');
-                case '＿' -> result.append('_');
-                case '．' -> result.append('.');
-                case '，' -> result.append(',');
-                case '！' -> result.append('!');
-                case '？' -> result.append('?');
-                case '：' -> result.append(':');
-                case '；' -> result.append(';');
-                case '（' -> result.append('(');
-                case '）' -> result.append(')');
-                case '［' -> result.append('[');
-                case '］' -> result.append(']');
-                case '｛' -> result.append('{');
-                case '｝' -> result.append('}');
-                case '＋' -> result.append('+');
-                case '＝' -> result.append('=');
-                case '＜' -> result.append('<');
-                case '＞' -> result.append('>');
-                case '＆' -> result.append('&');
-                case '％' -> result.append('%');
-                case '＄' -> result.append('$');
-                case '＃' -> result.append('#');
-                case '＠' -> result.append('@');
-                case '＊' -> result.append('*');
-                case '／' -> result.append('/');
-                case '＼' -> result.append('\\');
-                case '｜' -> result.append('|');
-                case '～' -> result.append('~');
-                case '｀' -> result.append('`');
-                case '＾' -> result.append('^');
-                case '″' -> result.append('"');
-                case '＇' -> result.append('\'');
+        // code points not chars or emoji/math letters get split in half
+        normalized.codePoints().forEach(cp -> {
+            if (Character.getType(cp) == Character.NON_SPACING_MARK) return;
 
-                default -> result.append(Character.toLowerCase(c));
+            Character mapped = HOMOGLYPHS.get(cp);
+            if (mapped != null) {
+                result.append(mapped);
+            } else {
+                result.appendCodePoint(Character.toLowerCase(cp));
             }
-        }
+        });
 
-        return result.toString().toLowerCase();
+        return result.toString().toLowerCase(Locale.ROOT);
+    }
+
+    private static Map<Integer, Character> buildHomoglyphs() {
+        Map<Integer, Character> map = new java.util.HashMap<>();
+        put(map, 'a', 'ᴀ', 'а', 'α', 'А', 'Α', 'ɑ');
+        put(map, 'b', 'ʙ', 'в', 'β', 'В', 'Β', 'Ь', 'ь');
+        put(map, 'c', 'ᴄ', 'с', 'С', 'ϲ', 'Ϲ');
+        put(map, 'd', 'ᴅ', 'ԁ', 'Ԁ');
+        put(map, 'e', 'ᴇ', 'е', 'ε', 'Е', 'Ε', 'є', 'Є');
+        put(map, 'f', 'ꜰ', 'ք');
+        put(map, 'g', 'ɢ', 'ɡ', 'ց');
+        put(map, 'h', 'ʜ', 'н', 'Н', 'Η', 'һ', 'Һ');
+        put(map, 'i', 'ɪ', 'і', 'І', 'Ι', 'ι', 'ǀ');
+        put(map, 'j', 'ᴊ', 'ј', 'Ј', 'ϳ');
+        put(map, 'k', 'ᴋ', 'к', 'κ', 'К', 'Κ');
+        put(map, 'l', 'ʟ', 'ӏ', 'Ӏ');
+        put(map, 'm', 'ᴍ', 'м', 'М', 'Μ');
+        put(map, 'n', 'ɴ', 'п', 'η', 'П', 'Ν', 'ռ');
+        put(map, 'o', 'ᴏ', 'о', 'ο', 'О', 'Ο', 'σ', 'ө', 'Ө');
+        put(map, 'p', 'ᴘ', 'р', 'ρ', 'Р', 'Ρ');
+        put(map, 'q', 'ꞯ', 'ǫ', 'գ');
+        put(map, 'r', 'ʀ', 'г', 'Г', 'ѓ');
+        put(map, 's', 'ꜱ', 'ѕ', 'Ѕ', 'ș');
+        put(map, 't', 'ᴛ', 'т', 'τ', 'Т', 'Τ');
+        put(map, 'u', 'ᴜ', 'υ', 'ц', 'Ц', 'ս');
+        put(map, 'v', 'ᴠ', 'ν', 'ѵ', 'Ѵ');
+        put(map, 'w', 'ᴡ', 'ω', 'ш', 'Ш', 'ա');
+        put(map, 'x', 'х', 'χ', 'Х', 'Χ', '×');
+        put(map, 'y', 'ʏ', 'у', 'Υ', 'У', 'γ', 'ү');
+        put(map, 'z', 'ᴢ', 'Ζ', 'ζ');
+        return Map.copyOf(map);
+    }
+
+    private static void put(Map<Integer, Character> map, char ascii, char... variants) {
+        for (char variant : variants) map.put((int) variant, ascii);
     }
 }

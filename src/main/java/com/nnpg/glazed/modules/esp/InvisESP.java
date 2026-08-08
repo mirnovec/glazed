@@ -3,23 +3,22 @@ package com.nnpg.glazed.modules.esp;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.*;
-import meteordevelopment.meteorclient.systems.modules.Categories;
+import com.nnpg.glazed.GlazedAddon;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.mob.MobEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.util.math.Box;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.phys.AABB;
 
 public class InvisESP extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgPlayers = settings.createGroup("Players");
     private final SettingGroup sgMobs = settings.createGroup("Mobs");
     
-    // General Settings
     private final Setting<ShapeMode> shapeMode = sgGeneral.add(new EnumSetting.Builder<ShapeMode>()
         .name("shape-mode")
         .description("How the box should be rendered")
@@ -57,7 +56,6 @@ public class InvisESP extends Module {
 
     private final Setting<Boolean> notifications = sgGeneral.add(new BoolSetting.Builder().name("notifications").description("Show chat feedback.").defaultValue(true).build());
     
-    // Player Settings
     private final Setting<Boolean> showPlayers = sgPlayers.add(new BoolSetting.Builder()
         .name("show-players")
         .description("Show hitboxes for players")
@@ -89,7 +87,6 @@ public class InvisESP extends Module {
         .build()
     );
     
-    // Mob Settings
     private final Setting<Boolean> showMobs = sgMobs.add(new BoolSetting.Builder()
         .name("show-mobs")
         .description("Show hitboxes for mobs")
@@ -130,7 +127,7 @@ public class InvisESP extends Module {
     );
 
     public InvisESP() {
-        super(Categories.Render, "invis-esp", "Shows 3D hitbox for invisible players and mobs");
+        super(GlazedAddon.esp, "invis-esp", "Shows 3D hitbox for invisible players and mobs");
     }
 
     @Override
@@ -140,29 +137,23 @@ public class InvisESP extends Module {
 
     @EventHandler
     private void onRender3D(Render3DEvent event) {
-        if (mc.world == null || mc.player == null) return;
+        if (mc.level == null || mc.player == null) return;
 
-        for (Entity entity : mc.world.getEntities()) {
-            // Skip if not a living entity
+        for (Entity entity : mc.level.entitiesForRendering()) {
             if (!(entity instanceof LivingEntity livingEntity)) continue;
             
-            // Skip self if disabled
             if (entity == mc.player && !showSelf.get()) continue;
             
-            // Check if only invisible mode is enabled
             if (onlyInvis.get() && !entity.isInvisible()) continue;
             
-            // Handle players
-            if (entity instanceof PlayerEntity) {
+            if (entity instanceof Player) {
                 if (!showPlayers.get()) continue;
                 renderHitbox(event, entity, playerColor.get(), playerLineColor.get());
             }
-            // Handle mobs
-            else if (entity instanceof MobEntity mob) {
+            else if (entity instanceof Mob mob) {
                 if (!showMobs.get()) continue;
                 
-                // Check passive/hostile filter
-                boolean isHostile = mob.isAttacking() || mob.getTarget() != null;
+                boolean isHostile = mob.isAggressive() || mob.getTarget() != null;
                 if (isHostile && !showHostile.get()) continue;
                 if (!isHostile && !showPassive.get()) continue;
                 
@@ -172,14 +163,11 @@ public class InvisESP extends Module {
     }
 
     private void renderHitbox(Render3DEvent event, Entity entity, SettingColor fillColor, SettingColor lineColor) {
-        // Get entity bounding box
-        Box box = entity.getBoundingBox();
+        AABB box = entity.getBoundingBox();
         
-        // Calculate distance for fading
-        double distance = mc.player.squaredDistanceTo(entity);
+        double distance = mc.player.distanceToSqr(entity);
         double fadeStart = fadeDistance.get();
         
-        // Apply fade if enabled
         Color finalFillColor = fillColor.copy();
         Color finalLineColor = lineColor.copy();
         
@@ -189,7 +177,6 @@ public class InvisESP extends Module {
             finalLineColor.a = (int) (lineColor.a * fadeFactor);
         }
         
-        // Render the box
         event.renderer.box(
             box.minX, box.minY, box.minZ,
             box.maxX, box.maxY, box.maxZ,
@@ -203,14 +190,14 @@ public class InvisESP extends Module {
     @Override
     public String getInfoString() {
         int count = 0;
-        if (mc.world != null) {
-            for (Entity entity : mc.world.getEntities()) {
+        if (mc.level != null) {
+            for (Entity entity : mc.level.entitiesForRendering()) {
                 if (!(entity instanceof LivingEntity)) continue;
                 if (entity == mc.player && !showSelf.get()) continue;
                 if (onlyInvis.get() && !entity.isInvisible()) continue;
                 
-                if ((entity instanceof PlayerEntity && showPlayers.get()) ||
-                    (entity instanceof MobEntity && showMobs.get())) {
+                if ((entity instanceof Player && showPlayers.get()) ||
+                    (entity instanceof Mob && showMobs.get())) {
                     count++;
                 }
             }

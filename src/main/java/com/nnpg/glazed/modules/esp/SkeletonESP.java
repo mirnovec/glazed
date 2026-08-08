@@ -7,10 +7,9 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.option.Perspective;
-import net.minecraft.client.network.AbstractClientPlayerEntity;
-import net.minecraft.util.math.Vec3d;
-
+import net.minecraft.client.CameraType;
+import net.minecraft.client.player.AbstractClientPlayer;
+import net.minecraft.world.phys.Vec3;
 import java.util.List;
 
 public class SkeletonESP extends Module {
@@ -66,85 +65,68 @@ public class SkeletonESP extends Module {
 
     @EventHandler
     private void onRender(Render3DEvent event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null) return;
 
-        List<AbstractClientPlayerEntity> players = mc.world.getPlayers();
+        List<AbstractClientPlayer> players = mc.level.players();
 
-        for (AbstractClientPlayerEntity player : players) {
-            // Skip self in first-person
-            if (mc.options.getPerspective() == Perspective.FIRST_PERSON && player == mc.player) continue;
+        for (AbstractClientPlayer player : players) {
+            if (mc.options.getCameraType() == CameraType.FIRST_PERSON && player == mc.player) continue;
 
-            Vec3d basePos = player.getLerpedPos(event.tickDelta);
+            Vec3 basePos = player.getPosition(event.tickDelta);
             Color skeletonColor = distanceColors.get() ? getColorFromDistance(basePos) : new Color(color.get());
 
-            // Rotation
-            double yawRad = Math.toRadians(-player.bodyYaw);
+            double yawRad = Math.toRadians(-player.yBodyRot);
 
-            // Base chest position with fixed vertical offset
-            Vec3d chestBase = basePos.add(0, verticalOffset.get(), 0);
+            Vec3 chestBase = basePos.add(0, verticalOffset.get(), 0);
 
-            if (player.isSneaking()) {
+            if (player.isShiftKeyDown()) {
                 chestBase = chestBase.add(0, -0.2, 0);
             }
 
-            // Apply forward offset rotated with player
-            Vec3d forwardVec = new Vec3d(0, 0, forwardOffset.get()).rotateY((float) yawRad);
+            Vec3 forwardVec = new Vec3(0, 0, forwardOffset.get()).yRot((float) yawRad);
             chestBase = chestBase.add(forwardVec);
 
-            // Shoulder positions
-            Vec3d leftShoulder = chestBase.add(new Vec3d(-horizontalOffset.get(), 0, 0).rotateY((float) yawRad));
-            Vec3d rightShoulder = chestBase.add(new Vec3d(horizontalOffset.get(), 0, 0).rotateY((float) yawRad));
+            Vec3 leftShoulder = chestBase.add(new Vec3(-horizontalOffset.get(), 0, 0).yRot((float) yawRad));
+            Vec3 rightShoulder = chestBase.add(new Vec3(horizontalOffset.get(), 0, 0).yRot((float) yawRad));
 
-            // Arm endpoints
-            Vec3d leftArmEnd = leftShoulder.add(0, -0.6, 0);
-            Vec3d rightArmEnd = rightShoulder.add(0, -0.6, 0);
+            Vec3 leftArmEnd = leftShoulder.add(0, -0.6, 0);
+            Vec3 rightArmEnd = rightShoulder.add(0, -0.6, 0);
 
-            // Spine start (hips)
-            Vec3d spineStart = basePos.add(forwardVec);
+            Vec3 spineStart = basePos.add(forwardVec);
 
-            // Spine end (shoulder center)
-            Vec3d spineEnd = chestBase;
+            Vec3 spineEnd = chestBase;
 
-            // Head
-            Vec3d headTop = chestBase.add(0, 0.25, 0);
+            Vec3 headTop = chestBase.add(0, 0.25, 0);
 
-            // Draw spine
             event.renderer.line(spineStart.x, spineStart.y, spineStart.z,
                 spineEnd.x, spineEnd.y, spineEnd.z, skeletonColor);
 
-            // Shoulders
             event.renderer.line(leftShoulder.x, leftShoulder.y, leftShoulder.z,
                 rightShoulder.x, rightShoulder.y, rightShoulder.z, skeletonColor);
 
-            // Arms
             event.renderer.line(leftShoulder.x, leftShoulder.y, leftShoulder.z,
                 leftArmEnd.x, leftArmEnd.y, leftArmEnd.z, skeletonColor);
             event.renderer.line(rightShoulder.x, rightShoulder.y, rightShoulder.z,
                 rightArmEnd.x, rightArmEnd.y, rightArmEnd.z, skeletonColor);
 
-            // Head
             event.renderer.line(spineEnd.x, spineEnd.y, spineEnd.z,
                 headTop.x, headTop.y, headTop.z, skeletonColor);
         }
     }
 
-    private Color getColorFromDistance(Vec3d pos) {
-        double distance = mc.player.getEntityPos().distanceTo(pos);
+    private Color getColorFromDistance(Vec3 pos) {
+        double distance = mc.player.position().distanceTo(pos);
         double percent = Math.min(1.0, distance / 60.0);
 
         int r, g;
 
-        // Reverse gradient: Green (close) → Yellow → Orange → Red (far)
         if (percent < 0.33) {
-            // Green → Yellow
             r = (int)(percent / 0.33 * 255);
             g = 255;
         } else if (percent < 0.66) {
-            // Yellow → Orange
             r = 255;
             g = 255 - (int)((percent - 0.33) / 0.33 * 90);
         } else {
-            // Orange → Red
             r = 255;
             g = 165 - (int)((percent - 0.66) / 0.34 * 165);
         }

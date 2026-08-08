@@ -2,8 +2,7 @@ package com.nnpg.glazed.settings;
 
 import com.nnpg.glazed.utils.RandomBetweenInt;
 import meteordevelopment.meteorclient.settings.*;
-import net.minecraft.nbt.NbtCompound;
-
+import net.minecraft.nbt.CompoundTag;
 import java.util.function.Consumer;
 
 public class RandomBetweenIntSetting extends Setting<RandomBetweenInt> {
@@ -51,16 +50,16 @@ public class RandomBetweenIntSetting extends Setting<RandomBetweenInt> {
     }
 
     @Override
-    public NbtCompound save(NbtCompound tag) {
+    public CompoundTag save(CompoundTag tag) {
         tag.putInt("min", get().min);
         tag.putInt("max", get().max);
         return tag;
     }
 
     @Override
-    public RandomBetweenInt load(NbtCompound tag) {
-        int min = tag.getInt("min", defaultValue.min);
-        int max = tag.getInt("max", defaultValue.max);
+    public RandomBetweenInt load(CompoundTag tag) {
+        int min = tag.getIntOr("min", defaultValue.min);
+        int max = tag.getIntOr("max", defaultValue.max);
         return new RandomBetweenInt(min, max);
     }
 

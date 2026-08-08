@@ -1,38 +1,35 @@
 package com.nnpg.glazed.modules.main;
 
+import com.nnpg.glazed.utils.GlazedWebhook;
 import com.nnpg.glazed.GlazedAddon;
+import com.nnpg.glazed.utils.GlazedWebhook;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.Blocks;
-import net.minecraft.client.network.AbstractClientPlayerEntity;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.screen.GenericContainerScreenHandler;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.util.Hand;
-import net.minecraft.world.World;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.player.AbstractClientPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.network.chat.Component;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.ChestMenu;
+import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.enchantment.Enchantments;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 import meteordevelopment.meteorclient.systems.modules.misc.AutoReconnect;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
-import net.minecraft.enchantment.Enchantments;
-import net.minecraft.registry.tag.ItemTags;
-import net.minecraft.text.Text;
-
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Instant;
 import java.util.*;
 
@@ -191,10 +188,8 @@ public class SpawnerProtect extends Module {
     private boolean emergencyDisconnect = false;
     private String emergencyReason = "";
 
-    private World trackedWorld = null;
+    private Level trackedWorld = null;
     private int worldChangeCount = 0;
-    // If there are this many or more other players online, do not activate
-    // protection
     private final int PLAYER_COUNT_THRESHOLD = 3;
     private float targetYaw, targetPitch;
     private boolean rotating = false;
@@ -211,11 +206,11 @@ public class SpawnerProtect extends Module {
         resetState();
         configureLegitMining();
 
-        if (mc.world != null) {
-            trackedWorld = mc.world;
+        if (mc.level != null) {
+            trackedWorld = mc.level;
             worldChangeCount = 0;
             if (notifications.get())
-                info("SpawnerProtect activated - Monitoring world: " + mc.world.getRegistryKey().getValue());
+                info("SpawnerProtect activated - Monitoring world: " + mc.level.dimension().identifier());
             if (notifications.get())
                 info("Monitoring for players...");
         }
@@ -262,11 +257,11 @@ public class SpawnerProtect extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.world == null)
+        if (mc.player == null || mc.level == null)
             return;
         if (rotating) {
-            float yaw = mc.player.getYaw();
-            float pitch = mc.player.getPitch();
+            float yaw = mc.player.getYRot();
+            float pitch = mc.player.getXRot();
 
             float yawDiff = wrapDegrees(targetYaw - yaw);
             float pitchDiff = targetPitch - pitch;
@@ -274,8 +269,8 @@ public class SpawnerProtect extends Module {
             float newYaw = yaw + Math.signum(yawDiff) * Math.min(Math.abs(yawDiff), ROTATION_SPEED);
             float newPitch = pitch + Math.signum(pitchDiff) * Math.min(Math.abs(pitchDiff), ROTATION_SPEED);
 
-            mc.player.setYaw(newYaw);
-            mc.player.setPitch(newPitch);
+            mc.player.setYRot(newYaw);
+            mc.player.setXRot(newPitch);
 
             if (Math.abs(yawDiff) < 1f && Math.abs(pitchDiff) < 1f) {
                 rotating = false;
@@ -283,14 +278,14 @@ public class SpawnerProtect extends Module {
         }
 
         if (currentState == State.GOING_TO_SPAWNERS) {
-            mc.options.sneakKey.setPressed(true);
+            mc.options.keyShift.setDown(true);
         } else {
-            mc.options.sneakKey.setPressed(mc.options.sneakKey.isPressed());
+            mc.options.keyShift.setDown(mc.options.keyShift.isDown());
         }
 
         tickCounter++;
 
-        if (mc.world != trackedWorld) {
+        if (mc.level != trackedWorld) {
             handleWorldChange();
             return;
         }
@@ -341,7 +336,7 @@ public class SpawnerProtect extends Module {
 
     private void handleWorldChange() {
         worldChangeCount++;
-        trackedWorld = mc.world;
+        trackedWorld = mc.level;
 
         if (worldChangeCount == 1) {
             currentState = State.WORLD_CHANGED_ONCE;
@@ -368,12 +363,12 @@ public class SpawnerProtect extends Module {
         if (emergencyDistance.get() <= 0)
             return false;
 
-        long otherPlayers = mc.world.getPlayers().stream().filter(p -> p != mc.player).count();
+        long otherPlayers = mc.level.players().stream().filter(p -> p != mc.player).count();
         if (otherPlayers >= PLAYER_COUNT_THRESHOLD)
             return false;
 
-        for (PlayerEntity player : mc.world.getPlayers()) {
-            if (player == mc.player || player == null || !(player instanceof AbstractClientPlayerEntity))
+        for (Player player : mc.level.players()) {
+            if (player == mc.player || player == null || !(player instanceof AbstractClientPlayer))
                 continue;
 
             String playerName = player.getName().getString();
@@ -392,8 +387,8 @@ public class SpawnerProtect extends Module {
                 emergencyReason = "User " + playerName + " came too close";
 
                 toggle();
-                if (mc.world != null) {
-                    mc.world.disconnect(Text.literal(""));
+                if (mc.level != null) {
+                    mc.level.disconnect(Component.literal(""));
                 }
 
                 detectedPlayer = playerName;
@@ -409,13 +404,13 @@ public class SpawnerProtect extends Module {
     }
 
     private void checkForPlayers() {
-        // nigga
-        long otherPlayers = mc.world.getPlayers().stream().filter(p -> p != mc.player).count();
+        // 67
+        long otherPlayers = mc.level.players().stream().filter(p -> p != mc.player).count();
         if (otherPlayers >= PLAYER_COUNT_THRESHOLD)
             return;
 
-        for (PlayerEntity player : mc.world.getPlayers()) {
-            if (player == mc.player || player == null || !(player instanceof AbstractClientPlayerEntity))
+        for (Player player : mc.level.players()) {
+            if (player == mc.player || player == null || !(player instanceof AbstractClientPlayer))
                 continue;
 
             double distance = mc.player.distanceTo(player);
@@ -446,7 +441,7 @@ public class SpawnerProtect extends Module {
     }
 
     private boolean isPlayerWhitelisted(String playerName) {
-        // Check global admin list first
+        //check global admin list first
         AdminList adminList = Modules.get().get(AdminList.class);
         if (adminList != null && adminList.isActive() && adminList.isAdmin(playerName)) {
             return true;
@@ -462,12 +457,12 @@ public class SpawnerProtect extends Module {
 
     private FindItemResult findSilkTouchPickaxe() {
         return InvUtils.find(stack -> {
-            if (!stack.isIn(ItemTags.PICKAXES))
+            if (!stack.is(ItemTags.PICKAXES))
                 return false;
 
             var enchantments = stack.getEnchantments();
-            for (var entry : enchantments.getEnchantmentEntries()) {
-                if (entry.getKey().matchesKey(Enchantments.SILK_TOUCH))
+            for (var entry : enchantments.entrySet()) {
+                if (entry.getKey().is(Enchantments.SILK_TOUCH))
                     return true;
             }
             return false;
@@ -475,10 +470,9 @@ public class SpawnerProtect extends Module {
     }
 
     private void handleGoingToSpawners() {
-        mc.options.sneakKey.setPressed(true);
+        mc.options.keyShift.setDown(true);
 
-        // Check if current target is still valid before doing anything else
-        if (currentTarget != null && mc.world.getBlockState(currentTarget).getBlock() != Blocks.SPAWNER) {
+        if (currentTarget != null && mc.level.getBlockState(currentTarget).getBlock() != Blocks.SPAWNER) {
             currentTarget = null;
             currentTargetStartTime = -1;
             stopBreaking();
@@ -490,7 +484,6 @@ public class SpawnerProtect extends Module {
             currentTarget = findNearestSpawner();
 
             if (currentTarget == null) {
-                // Start the delay timer when no spawners are found
                 if (noSpawnerStartTime == -1) {
                     noSpawnerStartTime = System.currentTimeMillis();
                     if (notifications.get())
@@ -498,14 +491,11 @@ public class SpawnerProtect extends Module {
                     return;
                 }
                 
-                // Check if the delay has passed
                 long elapsed = System.currentTimeMillis() - noSpawnerStartTime;
                 if (elapsed < spawnerCheckDelay.get()) {
-                    // Still waiting, keep checking for new spawners
                     return;
                 }
                 
-                // Delay passed, confirm no spawners and move to chest
                 invalidSpawners.clear();
                 stopBreaking();
                 currentState = State.GOING_TO_CHEST;
@@ -515,17 +505,14 @@ public class SpawnerProtect extends Module {
                 return;
             }
             
-            // Found a new spawner, start the timer
             currentTargetStartTime = System.currentTimeMillis();
             if (notifications.get())
                 info("Found spawner at " + currentTarget + ", distance: " + 
-                    String.format("%.1f", Math.sqrt(currentTarget.getSquaredDistance(mc.player.getX(), mc.player.getY(), mc.player.getZ()))));
+                    String.format("%.1f", Math.sqrt(currentTarget.distToLowCornerSqr(mc.player.getX(), mc.player.getY(), mc.player.getZ()))));
         }
         
-        // Reset the no-spawner timer when we find a spawner
         noSpawnerStartTime = -1;
 
-        // Check if we've been trying to mine this spawner for too long
         if (currentTargetStartTime != -1) {
             long timeTrying = System.currentTimeMillis() - currentTargetStartTime;
             if (timeTrying > spawnerTimeout.get()) {
@@ -541,11 +528,9 @@ public class SpawnerProtect extends Module {
 
         Direction side = getExposedFaceSide(currentTarget);
         
-        // Start rotating towards the spawner
         lookAtBlock(currentTarget, side);
 
-        // Mine if we're looking at the spawner
-        if (mc.crosshairTarget instanceof BlockHitResult hit
+        if (mc.hitResult instanceof BlockHitResult hit
                 && hit.getBlockPos().equals(currentTarget)) {
             
             FindItemResult pickaxe = findSilkTouchPickaxe();
@@ -559,72 +544,64 @@ public class SpawnerProtect extends Module {
 
             InvUtils.swap(pickaxe.slot(), true);
 
-            mc.options.attackKey.setPressed(true);
-            mc.interactionManager.updateBlockBreakingProgress(currentTarget, hit.getSide());
+            mc.options.keyAttack.setDown(true);
+            mc.gameMode.continueDestroyBlock(currentTarget, hit.getDirection());
         }
-        // Don't immediately mark as invalid - let the timeout handle it
     }
 
     private BlockPos findNearestSpawner() {
-        BlockPos playerPos = mc.player.getBlockPos();
+        BlockPos playerPos = mc.player.blockPosition();
         BlockPos nearest = null;
         double nearestDistance = Double.MAX_VALUE;
         
-        // Use spawnerRange setting for distance check (squared for efficiency)
         double maxDistanceSq = spawnerRange.get() * spawnerRange.get();
 
-        for (BlockPos pos : BlockPos.iterate(
-                playerPos.add(-spawnerRange.get(), -spawnerRange.get(), -spawnerRange.get()),
-                playerPos.add(spawnerRange.get(), spawnerRange.get(), spawnerRange.get()))) {
+        for (BlockPos pos : BlockPos.betweenClosed(
+                playerPos.offset(-spawnerRange.get(), -spawnerRange.get(), -spawnerRange.get()),
+                playerPos.offset(spawnerRange.get(), spawnerRange.get(), spawnerRange.get()))) {
 
-            if (mc.world.getBlockState(pos).getBlock() != Blocks.SPAWNER) continue;
+            if (mc.level.getBlockState(pos).getBlock() != Blocks.SPAWNER) continue;
             if (invalidSpawners.contains(pos)) continue;
 
-            double distanceSq = pos.getSquaredDistance(mc.player.getX(), mc.player.getY(), mc.player.getZ());
+            double distanceSq = pos.distToLowCornerSqr(mc.player.getX(), mc.player.getY(), mc.player.getZ());
             if (distanceSq > maxDistanceSq) continue;
 
             if (distanceSq < nearestDistance) {
                 nearestDistance = distanceSq;
-                nearest = pos.toImmutable();
+                nearest = pos.immutable();
             }
         }
 
         return nearest;
     }
     private boolean hasLineOfSight(BlockPos pos, Direction side) {
-        Vec3d eyePos = mc.player.getEyePos();
-        Vec3d targetPos = Vec3d.ofCenter(pos).add(Vec3d.of(side.getVector()).multiply(0.5));
+        Vec3 eyePos = mc.player.getEyePosition();
+        Vec3 targetPos = Vec3.atCenterOf(pos).add(Vec3.atLowerCornerOf(side.getUnitVec3i()).scale(0.5));
 
-        // Use COLLIDER shape type which is more lenient for mining checks
-        BlockHitResult result = mc.world.raycast(new net.minecraft.world.RaycastContext(
+        BlockHitResult result = mc.level.clip(new net.minecraft.world.level.ClipContext(
                 eyePos,
                 targetPos,
-                net.minecraft.world.RaycastContext.ShapeType.COLLIDER,
-                net.minecraft.world.RaycastContext.FluidHandling.NONE,
+                net.minecraft.world.level.ClipContext.Block.COLLIDER,
+                net.minecraft.world.level.ClipContext.Fluid.NONE,
                 mc.player
         ));
 
-        if (result == null) return true; // No hit means clear path
+        if (result == null) return true; //big brain
 
-        // If we hit the spawner itself, we have line of sight
-        if (result.getType() == net.minecraft.util.hit.HitResult.Type.BLOCK
+        if (result.getType() == net.minecraft.world.phys.HitResult.Type.BLOCK
                 && result.getBlockPos().equals(pos)) {
             return true;
         }
         
-        // If we hit a block that is air or non-solid, allow it
-        if (result.getType() == net.minecraft.util.hit.HitResult.Type.BLOCK) {
+        if (result.getType() == net.minecraft.world.phys.HitResult.Type.BLOCK) {
             BlockPos hitPos = result.getBlockPos();
-            // Allow if we hit air or pass-through blocks
-            if (mc.world.getBlockState(hitPos).isAir()) {
+            if (mc.level.getBlockState(hitPos).isAir()) {
                 return true;
             }
-            // Allow if we hit a non-full block (like tall grass, water, etc.)
-            if (!mc.world.getBlockState(hitPos).isFullCube(mc.world, hitPos)) {
+            if (!mc.level.getBlockState(hitPos).isCollisionShapeFullBlock(mc.level, hitPos)) {
                 return true;
             }
-            // Special case: if the spawner is directly below us, allow mining
-            if (hitPos.equals(mc.player.getBlockPos()) || hitPos.equals(mc.player.getBlockPos().down())) {
+            if (hitPos.equals(mc.player.blockPosition()) || hitPos.equals(mc.player.blockPosition().below())) {
                 return true;
             }
         }
@@ -636,9 +613,9 @@ public class SpawnerProtect extends Module {
     }
 
     private void lookAtBlock(BlockPos pos, Direction side) {
-        Vec3d targetPos = Vec3d.ofCenter(pos).add(Vec3d.of(side.getVector()).multiply(0.5));
-        Vec3d playerPos = mc.player.getEyePos();
-        Vec3d dir = targetPos.subtract(playerPos).normalize();
+        Vec3 targetPos = Vec3.atCenterOf(pos).add(Vec3.atLowerCornerOf(side.getUnitVec3i()).scale(0.5));
+        Vec3 playerPos = mc.player.getEyePosition();
+        Vec3 dir = targetPos.subtract(playerPos).normalize();
 
         targetYaw = (float) Math.toDegrees(Math.atan2(-dir.x, dir.z));
         targetPitch = (float) Math.toDegrees(-Math.asin(dir.y));
@@ -646,17 +623,14 @@ public class SpawnerProtect extends Module {
     }
 
     private Direction getExposedFaceSide(BlockPos pos) {
-        // Check if player is standing directly on this spawner
-        BlockPos playerBlockPos = mc.player.getBlockPos();
-        if (pos.equals(playerBlockPos.down())) {
-            // Player is standing on the spawner, try to find any exposed side
-            // or return DOWN if we need to mine from below (unlikely but possible)
+        BlockPos playerBlockPos = mc.player.blockPosition();
+        if (pos.equals(playerBlockPos.below())) {
         }
         
         for (Direction side : Direction.values()) {
-            BlockPos neighbor = pos.offset(side);
-            if (mc.world.getBlockState(neighbor).isAir()
-                    || !mc.world.getBlockState(neighbor).isFullCube(mc.world, neighbor)) {
+            BlockPos neighbor = pos.relative(side);
+            if (mc.level.getBlockState(neighbor).isAir()
+                    || !mc.level.getBlockState(neighbor).isCollisionShapeFullBlock(mc.level, neighbor)) {
                 return side;
             }
         }
@@ -665,7 +639,7 @@ public class SpawnerProtect extends Module {
     }
 
     private void stopBreaking() {
-        mc.options.attackKey.setPressed(false);
+        mc.options.keyAttack.setDown(false);
     }
 
     private void handleGoingToChest() {
@@ -690,7 +664,7 @@ public class SpawnerProtect extends Module {
 
         moveTowardsBlock(targetChest);
 
-        if (mc.player.getBlockPos().getSquaredDistance(targetChest) <= 9) {
+        if (mc.player.blockPosition().distSqr(targetChest) <= 9) {
             currentState = State.OPENING_CHEST;
             chestOpenAttempts = 0;
             if (notifications.get())
@@ -705,19 +679,19 @@ public class SpawnerProtect extends Module {
     }
 
     private BlockPos findNearestEnderChest() {
-        BlockPos playerPos = mc.player.getBlockPos();
+        BlockPos playerPos = mc.player.blockPosition();
         BlockPos nearestChest = null;
         double nearestDistance = Double.MAX_VALUE;
 
-        for (BlockPos pos : BlockPos.iterate(
-                playerPos.add(-16, -8, -16),
-                playerPos.add(16, 8, 16))) {
+        for (BlockPos pos : BlockPos.betweenClosed(
+                playerPos.offset(-16, -8, -16),
+                playerPos.offset(16, 8, 16))) {
 
-            if (mc.world.getBlockState(pos).getBlock() == Blocks.ENDER_CHEST) {
-                double distance = pos.getSquaredDistance(mc.player.getX(), mc.player.getY(), mc.player.getZ());
+            if (mc.level.getBlockState(pos).getBlock() == Blocks.ENDER_CHEST) {
+                double distance = pos.distToLowCornerSqr(mc.player.getX(), mc.player.getY(), mc.player.getZ());
                 if (distance < nearestDistance) {
                     nearestDistance = distance;
-                    nearestChest = pos.toImmutable();
+                    nearestChest = pos.immutable();
                 }
             }
         }
@@ -726,14 +700,14 @@ public class SpawnerProtect extends Module {
     }
 
     private void moveTowardsBlock(BlockPos target) {
-        Vec3d playerPos = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
-        Vec3d targetPos = Vec3d.ofCenter(target);
-        Vec3d direction = targetPos.subtract(playerPos).normalize();
+        Vec3 playerPos = new Vec3(mc.player.getX(), mc.player.getY(), mc.player.getZ());
+        Vec3 targetPos = Vec3.atCenterOf(target);
+        Vec3 direction = targetPos.subtract(playerPos).normalize();
 
         double yaw = Math.toDegrees(Math.atan2(-direction.x, direction.z));
-        mc.player.setYaw((float) yaw);
+        mc.player.setYRot((float) yaw);
 
-        KeyBinding.setKeyPressed(mc.options.forwardKey.getDefaultKey(), true);
+        KeyMapping.set(mc.options.keyUp.getDefaultKey(), true);
     }
 
     private void handleOpeningChest() {
@@ -744,22 +718,22 @@ public class SpawnerProtect extends Module {
 
         if (sneaking) {
         }
-        mc.options.sneakKey.setPressed(false);
+        mc.options.keyShift.setDown(false);
 
-        KeyBinding.setKeyPressed(mc.options.forwardKey.getDefaultKey(), false);
-        KeyBinding.setKeyPressed(mc.options.jumpKey.getDefaultKey(), true);
+        KeyMapping.set(mc.options.keyUp.getDefaultKey(), false);
+        KeyMapping.set(mc.options.keyJump.getDefaultKey(), true);
 
         if (chestOpenAttempts < 20) {
             lookAtBlock(targetChest);
         }
 
         if (chestOpenAttempts % 5 == 0) {
-            if (mc.interactionManager != null && mc.player != null) {
-                mc.interactionManager.interactBlock(
+            if (mc.gameMode != null && mc.player != null) {
+                mc.gameMode.useItemOn(
                         mc.player,
-                        Hand.MAIN_HAND,
+                        InteractionHand.MAIN_HAND,
                         new BlockHitResult(
-                                Vec3d.ofCenter(targetChest),
+                                Vec3.atCenterOf(targetChest),
                                 Direction.UP,
                                 targetChest,
                                 false));
@@ -770,8 +744,8 @@ public class SpawnerProtect extends Module {
 
         chestOpenAttempts++;
 
-        if (mc.player.currentScreenHandler instanceof GenericContainerScreenHandler) {
-            KeyBinding.setKeyPressed(mc.options.jumpKey.getDefaultKey(), false);
+        if (mc.player.containerMenu instanceof ChestMenu) {
+            KeyMapping.set(mc.options.keyJump.getDefaultKey(), false);
             currentState = State.DEPOSITING_ITEMS;
             lastProcessedSlot = -1;
             tickCounter = 0;
@@ -780,7 +754,7 @@ public class SpawnerProtect extends Module {
         }
 
         if (chestOpenAttempts > 200) {
-            KeyBinding.setKeyPressed(mc.options.jumpKey.getDefaultKey(), false);
+            KeyMapping.set(mc.options.keyJump.getDefaultKey(), false);
             if (notifications.get())
                 ChatUtils.error("Failed to open ender chest after multiple attempts!");
             currentState = State.DISCONNECTING;
@@ -795,16 +769,16 @@ public class SpawnerProtect extends Module {
             return;
         }
 
-        mc.options.sneakKey.setPressed(false);
+        mc.options.keyShift.setDown(false);
 
-        if (mc.player.currentScreenHandler instanceof GenericContainerScreenHandler) {
-            GenericContainerScreenHandler handler = (GenericContainerScreenHandler) mc.player.currentScreenHandler;
+        if (mc.player.containerMenu instanceof ChestMenu) {
+            ChestMenu handler = (ChestMenu) mc.player.containerMenu;
 
             if (!hasItemsToDeposit()) {
                 itemsDepositedSuccessfully = true;
                 if (notifications.get())
                     info("All items deposited successfully!");
-                mc.player.closeHandledScreen();
+                mc.player.closeContainer();
                 transferDelayCounter = 10;
                 currentState = State.DISCONNECTING;
                 return;
@@ -828,11 +802,9 @@ public class SpawnerProtect extends Module {
         if (stack.isEmpty() || stack.getItem() == Items.AIR)
             return true;
 
-        // Check if item is in the blacklist setting
         if (depositBlacklist.get().contains(stack.getItem()))
             return true;
 
-        // Silk touch pickaxes are no longer vital so they can be deposited at the end
 
         if (stack.getItem() == Items.ENDER_CHEST)
             return true;
@@ -842,7 +814,7 @@ public class SpawnerProtect extends Module {
 
     private boolean hasItemsToDeposit() {
         for (int i = 0; i < 36; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
+            ItemStack stack = mc.player.getInventory().getItem(i);
             if (!stack.isEmpty() && !isVitalItem(stack)) {
                 return true;
             }
@@ -850,12 +822,11 @@ public class SpawnerProtect extends Module {
         return false;
     }
 
-    private void transferItemsToChest(GenericContainerScreenHandler handler) {
+    private void transferItemsToChest(ChestMenu handler) {
         int totalSlots = handler.slots.size();
         int chestSlots = totalSlots - 36;
         int playerInventoryStart = chestSlots;
 
-        // Check if chest is full before depositing
         if (isChestFull(handler, chestSlots)) {
             if (notifications.get())
                 error("Ender chest is full! Disconnecting for safety.");
@@ -863,10 +834,9 @@ public class SpawnerProtect extends Module {
             return;
         }
 
-        // Phase 1: Spawners first
         for (int i = 0; i < 36; i++) {
             int slotId = playerInventoryStart + i;
-            ItemStack stack = handler.getSlot(slotId).getStack();
+            ItemStack stack = handler.getSlot(slotId).getItem();
 
             if (!stack.isEmpty() && stack.getItem() == Items.SPAWNER) {
                 depositSlot(handler, slotId, stack);
@@ -874,10 +844,9 @@ public class SpawnerProtect extends Module {
             }
         }
 
-        // Phase 2: Other non-vital items
         for (int i = 0; i < 36; i++) {
             int slotId = playerInventoryStart + i;
-            ItemStack stack = handler.getSlot(slotId).getStack();
+            ItemStack stack = handler.getSlot(slotId).getItem();
 
             if (!stack.isEmpty() && !isVitalItem(stack)) {
                 depositSlot(handler, slotId, stack);
@@ -891,16 +860,16 @@ public class SpawnerProtect extends Module {
         }
     }
 
-    private void depositSlot(GenericContainerScreenHandler handler, int slotId, ItemStack stack) {
+    private void depositSlot(ChestMenu handler, int slotId, ItemStack stack) {
         if (notifications.get())
             info("Transferring item from slot " + slotId + ": " + stack.getItem().toString());
 
-        if (mc.interactionManager != null) {
-            mc.interactionManager.clickSlot(
-                    handler.syncId,
+        if (mc.gameMode != null) {
+            mc.gameMode.handleInventoryMouseClick(
+                    handler.containerId,
                     slotId,
                     0,
-                    SlotActionType.QUICK_MOVE,
+                    ClickType.QUICK_MOVE,
                     mc.player);
         }
 
@@ -908,23 +877,18 @@ public class SpawnerProtect extends Module {
         transferDelayCounter = 2;
     }
 
-    private boolean isChestFull(GenericContainerScreenHandler handler, int chestSlots) {
-        // If there's any empty slot, it's not full
+    private boolean isChestFull(ChestMenu handler, int chestSlots) {
         for (int i = 0; i < chestSlots; i++) {
-            if (handler.getSlot(i).getStack().isEmpty())
+            if (handler.getSlot(i).getItem().isEmpty())
                 return false;
         }
-        // If all slots are non-empty, we consider it possibly full.
-        // Note: It might still have stackable space, but requirement says "deconnect if
-        // full".
-        // A more robust check would check if any stackable item can fit, but this is
-        // usually what users mean.
+
         return true;
     }
 
     private void handleDisconnecting() {
-        KeyBinding.setKeyPressed(mc.options.forwardKey.getDefaultKey(), false);
-        KeyBinding.setKeyPressed(mc.options.jumpKey.getDefaultKey(), false);
+        KeyMapping.set(mc.options.keyUp.getDefaultKey(), false);
+        KeyMapping.set(mc.options.keyJump.getDefaultKey(), false);
 
         sendWebhookNotification();
 
@@ -936,8 +900,8 @@ public class SpawnerProtect extends Module {
                 info("SpawnerProtect: " + detectedPlayer + " detected. Successfully disconnected.");
         }
 
-        if (mc.world != null) {
-            mc.world.disconnect(Text.literal(""));
+        if (mc.level != null) {
+            mc.level.disconnect(Component.literal(""));
         }
 
         if (notifications.get())
@@ -952,96 +916,38 @@ public class SpawnerProtect extends Module {
             return;
         }
 
-        String webhookUrlValue = webhookUrl.get().trim();
-
         long discordTimestamp = detectionTime / 1000L;
 
-        String messageContent = "";
-        if (selfPing.get() && discordId.get() != null && !discordId.get().trim().isEmpty()) {
-            messageContent = String.format("<@%s>", discordId.get().trim());
-        }
-
-        String embedJson = createWebhookPayload(messageContent, discordTimestamp);
-
-        new Thread(() -> {
-            try {
-                HttpClient client = HttpClient.newHttpClient();
-                HttpRequest request = HttpRequest.newBuilder()
-                        .uri(URI.create(webhookUrlValue))
-                        .header("Content-Type", "application/json")
-                        .POST(HttpRequest.BodyPublishers.ofString(embedJson))
-                        .build();
-
-                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-
-                if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                    if (notifications.get())
-                        info("Webhook notification sent successfully!");
-                } else {
-                    if (notifications.get())
-                        ChatUtils.error("Failed to send webhook notification. Status: " + response.statusCode());
-                }
-            } catch (Exception e) {
-                if (notifications.get())
-                    ChatUtils.error("Failed to send webhook notification: " + e.getMessage());
-            }
-        }).start();
+        GlazedWebhook.to(webhookUrl.get())
+            .username("Glazed Webhook")
+            .ping(selfPing.get() ? discordId.get() : null)
+            .title(emergencyDisconnect ? "SpawnerProtect Emergency Alert" : "SpawnerProtect Alert")
+            .description(buildDescription(discordTimestamp))
+            .color(emergencyDisconnect ? 16711680 : 16766720)
+            .onError(message -> {
+                if (notifications.get()) error("Failed to send webhook notification: " + message);
+            })
+            .send();
     }
 
-    private String createWebhookPayload(String messageContent, long discordTimestamp) {
-        String title = emergencyDisconnect ? "SpawnerProtect Emergency Alert" : "SpawnerProtect Alert";
-        String description;
-
+    private String buildDescription(long discordTimestamp) {
         if (emergencyDisconnect) {
-            description = String.format(
-                    "**Player Detected:** %s\\n**Detection Time:** <t:%d:R>\\n**Reason:** %s\\n**Disconnected:** Yes",
-                    escapeJson(detectedPlayer), discordTimestamp, escapeJson(emergencyReason));
-        } else {
-            description = String.format(
-                    "**Player Detected:** %s\\n**Detection Time:** <t:%d:R>\\n**Spawners Mined:** %s\\n**Items Deposited:** %s\\n**Disconnected:** Yes",
-                    escapeJson(detectedPlayer), discordTimestamp,
-                    spawnersMinedSuccessfully ? "✅ Success" : "❌ Failed",
-                    itemsDepositedSuccessfully ? "✅ Success" : "❌ Failed");
+            return String.format(
+                    "**Player Detected:** %s\n**Detection Time:** <t:%d:R>\n**Reason:** %s\n**Disconnected:** Yes",
+                    detectedPlayer, discordTimestamp, emergencyReason);
         }
 
-        int color = emergencyDisconnect ? 16711680 : 16766720;
-
-        return String.format("""
-                {
-                    "username": "Glazed Webhook",
-                    "avatar_url": "https://i.imgur.com/OL2y1cr.png",
-                    "content": "%s",
-                    "embeds": [{
-                        "title": "%s",
-                        "description": "%s",
-                        "color": %d,
-                        "timestamp": "%s",
-                        "footer": {
-                            "text": "Sent by Glazed"
-                        }
-                    }]
-                }""",
-                escapeJson(messageContent),
-                title,
-                description,
-                color,
-                Instant.now().toString());
-    }
-
-    private String escapeJson(String input) {
-        if (input == null)
-            return "";
-        return input.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
+        return String.format(
+                "**Player Detected:** %s\n**Detection Time:** <t:%d:R>\n**Spawners Mined:** %s\n**Items Deposited:** %s\n**Disconnected:** Yes",
+                detectedPlayer, discordTimestamp,
+                spawnersMinedSuccessfully ? "✅ Success" : "❌ Failed",
+                itemsDepositedSuccessfully ? "✅ Success" : "❌ Failed");
     }
 
     @Override
     public void onDeactivate() {
         stopBreaking();
-        KeyBinding.setKeyPressed(mc.options.forwardKey.getDefaultKey(), false);
-        KeyBinding.setKeyPressed(mc.options.jumpKey.getDefaultKey(), false);
+        KeyMapping.set(mc.options.keyUp.getDefaultKey(), false);
+        KeyMapping.set(mc.options.keyJump.getDefaultKey(), false);
     }
 }

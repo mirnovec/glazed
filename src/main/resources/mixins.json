@@ -1,12 +1,17 @@
 {
   "required": true,
   "package": "com.nnpg.glazed.mixins",
-  "compatibilityLevel": "JAVA_17",
+  "compatibilityLevel": "JAVA_21",
   "mixins": [],
   "client": [
     "HandledScreenMixin",
     "DefaultSettingsWidgetFactoryAccessor",
-    "DefaultSettingsWidgetFactoryMixin"
+    "DefaultSettingsWidgetFactoryMixin",
+    "ClientPlayNetworkHandlerMixin",
+    "InGameHudMixin",
+    "CameraMixin",
+    "EntityMixin",
+    "GameRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1

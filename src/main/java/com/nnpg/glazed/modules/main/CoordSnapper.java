@@ -1,16 +1,11 @@
 package com.nnpg.glazed.modules.main;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
+import com.nnpg.glazed.utils.GlazedWebhook;
 import com.nnpg.glazed.GlazedAddon;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.core.BlockPos;
 
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.time.Instant;
 
 public class CoordSnapper extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -59,17 +54,18 @@ public class CoordSnapper extends Module {
 
     @Override
     public void onActivate() {
+        // dont toggle in here, finally already does it
+        // old one toggled twice so the module just turned itself back on lmao
         try {
             if (mc.player == null) {
                 error("Player is null!");
-                toggle();
                 return;
             }
 
-            BlockPos pos = mc.player.getBlockPos();
+            BlockPos pos = mc.player.blockPosition();
             int x = pos.getX(), y = pos.getY(), z = pos.getZ();
             String coords = String.format("%d %d %d", x, y, z);
-            mc.keyboard.setClipboard(coords);
+            mc.keyboardHandler.setClipboard(coords);
             if (chatfeedback.get()) {
                 info("Copied coordinates: " + coords);
             }
@@ -86,48 +82,13 @@ public class CoordSnapper extends Module {
     }
 
     private void sendWebhook(int x, int y, int z) {
-        new Thread(() -> {
-            try {
-                URL url = new URL(webhookUrl.get());
-                HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-                connection.setRequestMethod("POST");
-                connection.setRequestProperty("Content-Type", "application/json");
-                connection.setDoOutput(true);
-
-                JsonObject json = new JsonObject();
-                json.addProperty("username", "Glazed Webhook");
-                json.addProperty("avatar_url", "https://i.imgur.com/OL2y1cr.png");
-
-                String messageContent = "";
-                if (selfPing.get() && !discordId.get().trim().isEmpty()) {
-                    messageContent = String.format("<@%s>", discordId.get().trim());
-                }
-                json.addProperty("content", messageContent);
-
-                JsonObject embed = new JsonObject();
-                embed.addProperty("title", "Coordsnapper Coords");
-                embed.addProperty("description", String.format("Coords: X: %d, Y: %d, Z: %d", x, y, z));
-                embed.addProperty("color", 0x7600FF);
-                embed.addProperty("timestamp", Instant.now().toString());
-
-                JsonObject footer = new JsonObject();
-                footer.addProperty("text", "Sent by Glazed");
-                embed.add("footer", footer);
-
-                JsonArray embeds = new JsonArray();
-                embeds.add(embed);
-                json.add("embeds", embeds);
-
-                try (OutputStream os = connection.getOutputStream()) {
-                    byte[] input = json.toString().getBytes("utf-8");
-                    os.write(input, 0, input.length);
-                }
-
-                connection.getInputStream().close();
-
-            } catch (Exception e) {
-                error("Webhook failed: " + e.getMessage());
-            }
-        }).start();
+        GlazedWebhook.to(webhookUrl.get())
+            .username("Glazed Webhook")
+            .ping(selfPing.get() ? discordId.get() : null)
+            .title("Coordsnapper Coords")
+            .description(String.format("Coords: X: %d, Y: %d, Z: %d", x, y, z))
+            .color(GlazedWebhook.COLOR_GLAZED)
+            .onError(message -> error("Webhook failed: " + message))
+            .send();
     }
 }

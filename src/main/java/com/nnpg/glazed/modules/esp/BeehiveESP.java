@@ -11,15 +11,14 @@ import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
-import net.minecraft.block.BeehiveBlock;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.chunk.Chunk;
-import net.minecraft.world.chunk.WorldChunk;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.BeehiveBlock;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.phys.Vec3;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -32,7 +31,7 @@ public class BeehiveESP extends Module {
     private final Setting<SettingColor> beehiveColor = sgGeneral.add(new ColorSetting.Builder()
         .name("beehive-color")
         .description("Full beehive box color")
-        .defaultValue(new SettingColor(255, 215, 0, 100)) // Golden color for honey
+        .defaultValue(new SettingColor(255, 215, 0, 100))
         .build());
 
     private final Setting<ShapeMode> beehiveShapeMode = sgGeneral.add(new EnumSetting.Builder<ShapeMode>()
@@ -157,10 +156,8 @@ public class BeehiveESP extends Module {
         .visible(useThreading::get)
         .build());
 
-    // Thread-safe collection
     private final Set<BlockPos> beehivePositions = ConcurrentHashMap.newKeySet();
 
-    // Threading
     private ExecutorService threadPool;
 
     public BeehiveESP() {
@@ -169,9 +166,8 @@ public class BeehiveESP extends Module {
 
     @Override
     public void onActivate() {
-        if (mc.world == null) return;
+        if (mc.level == null) return;
 
-        // Initialize thread pool
         if (useThreading.get()) {
             threadPool = Executors.newFixedThreadPool(threadPoolSize.get());
         }
@@ -179,23 +175,20 @@ public class BeehiveESP extends Module {
         beehivePositions.clear();
 
         if (useThreading.get()) {
-            // Scan chunks asynchronously
-            for (Chunk chunk : Utils.chunks()) {
-                if (chunk instanceof WorldChunk worldChunk) {
+            for (ChunkAccess chunk : Utils.chunks()) {
+                if (chunk instanceof LevelChunk worldChunk) {
                     threadPool.submit(() -> scanChunkForBeehives(worldChunk));
                 }
             }
         } else {
-            // Scan chunks synchronously
-            for (Chunk chunk : Utils.chunks()) {
-                if (chunk instanceof WorldChunk worldChunk) scanChunkForBeehives(worldChunk);
+            for (ChunkAccess chunk : Utils.chunks()) {
+                if (chunk instanceof LevelChunk worldChunk) scanChunkForBeehives(worldChunk);
             }
         }
     }
 
     @Override
     public void onDeactivate() {
-        // Shutdown thread pool
         if (threadPool != null && !threadPool.isShutdown()) {
             threadPool.shutdown();
             threadPool = null;
@@ -218,7 +211,6 @@ public class BeehiveESP extends Module {
         BlockPos pos = event.pos;
         BlockState state = event.newState;
 
-        // Create a task for block update processing
         Runnable updateTask = () -> {
             boolean isBeehive = isValidBeehive(state, pos.getY());
             if (isBeehive) {
@@ -241,12 +233,12 @@ public class BeehiveESP extends Module {
         }
     }
 
-    private void scanChunkForBeehives(WorldChunk chunk) {
+    private void scanChunkForBeehives(LevelChunk chunk) {
         ChunkPos cpos = chunk.getPos();
-        int xStart = cpos.getStartX();
-        int zStart = cpos.getStartZ();
-        int yMin = Math.max(chunk.getBottomY(), minY.get());
-        int yMax = Math.min(chunk.getBottomY() + chunk.getHeight(), maxY.get());
+        int xStart = cpos.getMinBlockX();
+        int zStart = cpos.getMinBlockZ();
+        int yMin = Math.max(chunk.getMinY(), minY.get());
+        int yMax = Math.min(chunk.getMinY() + chunk.getHeight(), maxY.get());
 
         Set<BlockPos> chunkBeehives = new HashSet<>();
         int foundCount = 0;
@@ -264,13 +256,11 @@ public class BeehiveESP extends Module {
             }
         }
 
-        // Remove old beehive positions from this chunk
         beehivePositions.removeIf(pos -> {
             ChunkPos blockChunk = new ChunkPos(pos);
             return blockChunk.equals(cpos) && !chunkBeehives.contains(pos);
         });
 
-        // Add new beehive positions
         int newBlocks = 0;
         for (BlockPos pos : chunkBeehives) {
             if (beehivePositions.add(pos)) {
@@ -278,7 +268,6 @@ public class BeehiveESP extends Module {
             }
         }
 
-        // Provide chunk-level feedback to reduce spam
         if (beehiveChat.get() && foundCount > 0) {
             if (useThreading.get() && limitChatSpam.get()) {
                 if (newBlocks > 0) {
@@ -301,13 +290,11 @@ public class BeehiveESP extends Module {
     private boolean isValidBeehive(BlockState state, int y) {
         if (y < minY.get() || y > maxY.get()) return false;
 
-        // Check if it's a beehive or bee nest
-        boolean isBeehive = includeBeehives.get() && state.isOf(Blocks.BEEHIVE);
-        boolean isBeeNest = includeBeeNests.get() && state.isOf(Blocks.BEE_NEST);
+        boolean isBeehive = includeBeehives.get() && state.is(Blocks.BEEHIVE);
+        boolean isBeeNest = includeBeeNests.get() && state.is(Blocks.BEE_NEST);
 
         if (!isBeehive && !isBeeNest) return false;
 
-        // Check honey level
         int honeyLevel = getHoneyLevel(state);
 
         if (includeLevel0.get() && honeyLevel == 0) return true;
@@ -321,16 +308,16 @@ public class BeehiveESP extends Module {
     }
 
     private int getHoneyLevel(BlockState state) {
-        if (state.isOf(Blocks.BEEHIVE) || state.isOf(Blocks.BEE_NEST)) {
-            return state.get(BeehiveBlock.HONEY_LEVEL);
+        if (state.is(Blocks.BEEHIVE) || state.is(Blocks.BEE_NEST)) {
+            return state.getValue(BeehiveBlock.HONEY_LEVEL);
         }
         return -1;
     }
 
     private String getHiveTypeName(BlockState state) {
-        if (state.isOf(Blocks.BEEHIVE)) {
+        if (state.is(Blocks.BEEHIVE)) {
             return "Beehive";
-        } else if (state.isOf(Blocks.BEE_NEST)) {
+        } else if (state.is(Blocks.BEE_NEST)) {
             return "Bee Nest";
         }
         return "Hive";
@@ -359,55 +346,44 @@ public class BeehiveESP extends Module {
     private void onRender(Render3DEvent event) {
         if (mc.player == null) return;
 
-        // Use interpolated position for smooth movement
-        Vec3d playerPos = mc.player.getLerpedPos(event.tickDelta);
+        Vec3 playerPos = mc.player.getPosition(event.tickDelta);
         Color side = new Color(beehiveColor.get());
         Color outline = new Color(beehiveColor.get());
         Color tracerColorValue = new Color(tracerColor.get());
 
-        // Get render distance
-        int renderDistance = mc.options.getViewDistance().getValue() * 16;
+        int renderDistance = mc.options.renderDistance().get() * 16;
 
         for (BlockPos pos : beehivePositions) {
-            // Check if within render distance - this applies to both ESP box and tracers
             if (!isWithinRenderDistance(playerPos, pos, renderDistance)) continue;
 
-            // Get the actual block state to determine honey level for color variation
-            BlockState state = mc.world.getBlockState(pos);
+            BlockState state = mc.level.getBlockState(pos);
             int honeyLevel = getHoneyLevel(state);
 
-            // Adjust color intensity based on honey level (brighter for fuller hives)
             Color levelAdjustedSide, levelAdjustedOutline;
-            float intensity = (honeyLevel + 1) / 6.0f; // Scale from 1/6 to 6/6
+            float intensity = (honeyLevel + 1) / 6.0f;
 
             switch (honeyLevel) {
                 case 0:
-                    // Very dim for empty hives
                     levelAdjustedSide = new Color((int)(side.r * 0.2f), (int)(side.g * 0.2f), (int)(side.b * 0.2f), side.a);
                     levelAdjustedOutline = new Color((int)(outline.r * 0.2f), (int)(outline.g * 0.2f), (int)(outline.b * 0.2f), outline.a);
                     break;
                 case 1:
-                    // Dim
                     levelAdjustedSide = new Color((int)(side.r * 0.4f), (int)(side.g * 0.4f), (int)(side.b * 0.4f), side.a);
                     levelAdjustedOutline = new Color((int)(outline.r * 0.4f), (int)(outline.g * 0.4f), (int)(outline.b * 0.4f), outline.a);
                     break;
                 case 2:
-                    // Medium dim
                     levelAdjustedSide = new Color((int)(side.r * 0.6f), (int)(side.g * 0.6f), (int)(side.b * 0.6f), side.a);
                     levelAdjustedOutline = new Color((int)(outline.r * 0.6f), (int)(outline.g * 0.6f), (int)(outline.b * 0.6f), outline.a);
                     break;
                 case 3:
-                    // Medium
                     levelAdjustedSide = new Color((int)(side.r * 0.8f), (int)(side.g * 0.8f), (int)(side.b * 0.8f), side.a);
                     levelAdjustedOutline = new Color((int)(outline.r * 0.8f), (int)(outline.g * 0.8f), (int)(outline.b * 0.8f), outline.a);
                     break;
                 case 4:
-                    // Almost full - normal brightness
                     levelAdjustedSide = side;
                     levelAdjustedOutline = outline;
                     break;
                 case 5:
-                    // Full - bright golden glow
                     levelAdjustedSide = new Color(Math.min(255, (int)(side.r * 1.3f)),
                         Math.min(255, (int)(side.g * 1.3f)),
                         Math.min(255, (int)(side.b * 1.1f)),
@@ -422,26 +398,21 @@ public class BeehiveESP extends Module {
                     levelAdjustedOutline = outline;
             }
 
-            // Render ESP box
             event.renderer.box(pos, levelAdjustedSide, levelAdjustedOutline, beehiveShapeMode.get(), 0);
 
-            // Render tracer if enabled
             if (tracers.get()) {
-                Vec3d blockCenter = Vec3d.ofCenter(pos);
+                Vec3 blockCenter = Vec3.atCenterOf(pos);
 
-                // Start tracer from slightly in front of camera to make it visible in first person
-                Vec3d startPos;
-                if (mc.options.getPerspective().isFirstPerson()) {
-                    // First person: start tracer slightly forward from camera
-                    Vec3d lookDirection = mc.player.getRotationVector();
-                    startPos = new Vec3d(
+                Vec3 startPos;
+                if (mc.options.getCameraType().isFirstPerson()) {
+                    Vec3 lookDirection = mc.player.getLookAngle();
+                    startPos = new Vec3(
                         playerPos.x + lookDirection.x * 0.5,
                         playerPos.y + mc.player.getEyeHeight(mc.player.getPose()) + lookDirection.y * 0.5,
                         playerPos.z + lookDirection.z * 0.5
                     );
                 } else {
-                    // Third person: use normal eye position
-                    startPos = new Vec3d(
+                    startPos = new Vec3(
                         playerPos.x,
                         playerPos.y + mc.player.getEyeHeight(mc.player.getPose()),
                         playerPos.z
@@ -454,7 +425,7 @@ public class BeehiveESP extends Module {
         }
     }
 
-    private boolean isWithinRenderDistance(Vec3d playerPos, BlockPos blockPos, int renderDistance) {
+    private boolean isWithinRenderDistance(Vec3 playerPos, BlockPos blockPos, int renderDistance) {
         double dx = playerPos.x - blockPos.getX() - 0.5;
         double dz = playerPos.z - blockPos.getZ() - 0.5;
         double horizontalDistance = Math.sqrt(dx * dx + dz * dz);
