@@ -34,10 +34,14 @@ public class GlazedAddon extends MeteorAddon {
         Modules.get().add(new BeehiveESP());
         Modules.get().add(new BlockNotifier());
         Modules.get().add(new ChunkFinder());
+        Modules.get().add(new CollectibleESP());
         Modules.get().add(new CoveredHole());
+        Modules.get().add(new DeepslateESP());
         Modules.get().add(new DrownedTridentESP());
+        Modules.get().add(new DripstoneESP());
         Modules.get().add(new HoleTunnelStairsESP());
         Modules.get().add(new InvisESP());
+        Modules.get().add(new KelpESP());
         Modules.get().add(new LamaESP());
         Modules.get().add(new LightESP());
         Modules.get().add(new OneByOneHoles());
@@ -46,8 +50,11 @@ public class GlazedAddon extends MeteorAddon {
         Modules.get().add(new RegionMap());
         Modules.get().add(new RotatedDeepslateESP());
         Modules.get().add(new SkeletonESP());
+        Modules.get().add(new SweetBerryESP());
         Modules.get().add(new SpawnerNotifier());
         Modules.get().add(new VillagerESP());
+        Modules.get().add(new VineESP());
+        Modules.get().add(new WanderingESP());
 
         // main
         Modules.get().add(new AHSell());
