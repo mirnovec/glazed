@@ -4,12 +4,10 @@ import com.nnpg.glazed.GlazedAddon;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
+import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
+import net.minecraft.world.item.Items;
 
 public class AutoDoubleHand extends Module {
-    private final MinecraftClient mc = MinecraftClient.getInstance();
     private boolean wasHoldingTotem = true;
 
     public AutoDoubleHand() {
@@ -18,20 +16,20 @@ public class AutoDoubleHand extends Module {
 
     @Override
     public void onActivate() {
-        wasHoldingTotem = mc.player != null && mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING);
+        wasHoldingTotem = mc.player != null && mc.player.getOffhandItem().is(Items.TOTEM_OF_UNDYING);
     }
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
-        if (mc.player == null || mc.interactionManager == null) return;
+        if (mc.player == null || mc.gameMode == null) return;
 
-        boolean holdingNow = mc.player.getOffHandStack().isOf(Items.TOTEM_OF_UNDYING);
+        boolean holdingNow = mc.player.getOffhandItem().is(Items.TOTEM_OF_UNDYING);
 
         if (wasHoldingTotem && !holdingNow) {
             int slot = findHotbarTotem();
             if (slot != -1) {
-                mc.player.getInventory().setSelectedSlot(slot);
-                mc.player.networkHandler.sendPacket(new UpdateSelectedSlotC2SPacket(slot));
+                mc.player.getInventory().selected = slot;
+                mc.player.connection.send(new ServerboundSetCarriedItemPacket(slot));
             }
         }
 
@@ -40,7 +38,7 @@ public class AutoDoubleHand extends Module {
 
     private int findHotbarTotem() {
         for (int i = 0; i < 9; i++) {
-            if (mc.player.getInventory().getStack(i).isOf(Items.TOTEM_OF_UNDYING)) return i;
+            if (mc.player.getInventory().getItem(i).is(Items.TOTEM_OF_UNDYING)) return i;
         }
         return -1;
     }

@@ -1,8 +1,7 @@
 package com.nnpg.glazed.settings;
 
 import meteordevelopment.meteorclient.settings.*;
-import net.minecraft.nbt.NbtCompound;
-
+import net.minecraft.nbt.CompoundTag;
 import java.util.function.Consumer;
 
 public class TextDisplaySetting extends Setting<String> {
@@ -31,13 +30,13 @@ public class TextDisplaySetting extends Setting<String> {
     }
 
     @Override
-    public NbtCompound save(NbtCompound tag) {
+    public CompoundTag save(CompoundTag tag) {
         tag.putString("value", get());
         return tag;
     }
 
     @Override
-    public String load(NbtCompound tag) {
+    public String load(CompoundTag tag) {
         return tag.contains("value") ? tag.getString("value") : defaultValue;
     }
 

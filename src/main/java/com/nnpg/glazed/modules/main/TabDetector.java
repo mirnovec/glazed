@@ -6,9 +6,8 @@ import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.render.MeteorToast;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.network.PlayerListEntry;
-import net.minecraft.item.Items;
-
+import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.world.item.Items;
 import java.util.*;
 
 public class TabDetector extends Module {
@@ -51,13 +50,13 @@ public class TabDetector extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null) return;
+        if (mc.player == null || mc.level == null || mc.getConnection() == null) return;
 
         currentTargetPlayers.clear();
 
-        Collection<PlayerListEntry> playerList = mc.getNetworkHandler().getPlayerList();
+        Collection<PlayerInfo> playerList = mc.getConnection().getOnlinePlayers();
 
-        for (PlayerListEntry entry : playerList) {
+        for (PlayerInfo entry : playerList) {
             String playerName = entry.getProfile().getName();
 
             for (String targetName : targetPlayers.get()) {
@@ -98,12 +97,12 @@ public class TabDetector extends Module {
             case Chat -> { if (notifications.get()) info(message); }
             case Toast -> {
                 String toastMessage = players.size() == 1 ? "Target Player Joined!" : "Target Players Joined!";
-                mc.getToastManager().add(new MeteorToast(Items.PLAYER_HEAD, title, toastMessage));
+                mc.getToastManager().addToast(new MeteorToast(Items.PLAYER_HEAD, title, toastMessage));
             }
             case Both -> {
                 if (notifications.get()) info(message);
                 String toastMessage = players.size() == 1 ? "Target Player Joined!" : "Target Players Joined!";
-                mc.getToastManager().add(new MeteorToast(Items.PLAYER_HEAD, title, toastMessage));
+                mc.getToastManager().addToast(new MeteorToast(Items.PLAYER_HEAD, title, toastMessage));
             }
         }
 
@@ -119,12 +118,12 @@ public class TabDetector extends Module {
             case Chat -> { if (notifications.get()) info(message); }
             case Toast -> {
                 String toastMessage = players.size() == 1 ? "Target Player Left!" : "Target Players Left!";
-                mc.getToastManager().add(new MeteorToast(Items.BARRIER, title, toastMessage));
+                mc.getToastManager().addToast(new MeteorToast(Items.BARRIER, title, toastMessage));
             }
             case Both -> {
                 if (notifications.get()) info(message);
                 String toastMessage = players.size() == 1 ? "Target Player Left!" : "Target Players Left!";
-                mc.getToastManager().add(new MeteorToast(Items.BARRIER, title, toastMessage));
+                mc.getToastManager().addToast(new MeteorToast(Items.BARRIER, title, toastMessage));
             }
         }
 
@@ -136,9 +135,9 @@ public class TabDetector extends Module {
         currentTargetPlayers.clear();
         previousTargetPlayers.clear();
 
-        if (mc.getNetworkHandler() != null) {
-            Collection<PlayerListEntry> playerList = mc.getNetworkHandler().getPlayerList();
-            for (PlayerListEntry entry : playerList) {
+        if (mc.getConnection() != null) {
+            Collection<PlayerInfo> playerList = mc.getConnection().getOnlinePlayers();
+            for (PlayerInfo entry : playerList) {
                 String playerName = entry.getProfile().getName();
                 for (String targetName : targetPlayers.get()) {
                     if (targetName.equalsIgnoreCase(playerName)) {

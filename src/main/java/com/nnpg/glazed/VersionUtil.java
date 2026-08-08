@@ -1,40 +1,50 @@
 package com.nnpg.glazed;
 
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.collection.DefaultedList;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.NonNullList;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.item.ItemStack;
 
-public class VersionUtil {
+// mc renames this stuff every version so keep it all in here
+public final class VersionUtil {
 
-    public static ItemStack getArmorStack(ClientPlayerEntity player, int slot) {
-    return player.getInventory().getStack(slot);
+    private VersionUtil() {}
+
+    public static int getSelectedSlot(LocalPlayer player) {
+        return player.getInventory().selected;
     }
 
-    public static ItemStack getArmorStackByType(ClientPlayerEntity player, int armorType) {
-    return player.getInventory().getStack(armorType);
+    public static void setSelectedSlot(LocalPlayer player, int slot) {
+        player.getInventory().selected = slot;
     }
 
-    public static int getSelectedSlot(ClientPlayerEntity player) {
-    return player.getInventory().selectedSlot;
+    public static double getPrevX(Entity entity) {
+        return entity.xOld;
     }
 
-    public static void setSelectedSlot(ClientPlayerEntity player, int slot) {
-    player.getInventory().setSelectedSlot(slot);
+    public static double getPrevY(Entity entity) {
+        return entity.yOld;
     }
 
-    public static double getPrevX(net.minecraft.entity.Entity entity) {
-    return entity.lastRenderX;
+    public static double getPrevZ(Entity entity) {
+        return entity.zOld;
     }
 
-    public static double getPrevY(net.minecraft.entity.Entity entity) {
-    return entity.lastRenderY;
+    public static NonNullList<ItemStack> getMainInventory(LocalPlayer player) {
+        return player.getInventory().items;
     }
 
-    public static double getPrevZ(net.minecraft.entity.Entity entity) {
-    return entity.lastRenderZ;
-    }
+    // 1.21.4 only has an exact-match lookup, so walk tab ourselves
+    public static PlayerInfo playerInfoIgnoreCase(ClientPacketListener handler, String name) {
+        if (handler == null || name == null) return null;
 
-    public static DefaultedList<ItemStack> getMainInventory(ClientPlayerEntity player) {
-    return player.getInventory().main;
+        for (PlayerInfo entry : handler.getOnlinePlayers()) {
+            String profile = entry.getProfile().getName();
+            if (profile != null && profile.equalsIgnoreCase(name)) return entry;
+        }
+
+        return null;
     }
 }

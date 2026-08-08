@@ -9,10 +9,9 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.BlockState;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -20,7 +19,6 @@ public class CoveredHole extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgRender = settings.createGroup("Render");
 
-    // Settings
     private final Setting<Boolean> chatNotifications = sgGeneral.add(new BoolSetting.Builder()
         .name("chat-notifications")
         .description("Send chat messages when covered holes are found")
@@ -65,13 +63,12 @@ public class CoveredHole extends Module {
         .build()
     );
 
-    // Runtime data
-    private final Map<Box, CoveredHoleInfo> coveredHoles = new ConcurrentHashMap<>();
-    private final Set<Box> processedHoles = ConcurrentHashMap.newKeySet();
-    private final Set<Box> pendingProcessing = ConcurrentHashMap.newKeySet();
-    private final Set<Box> notifiedHoles = ConcurrentHashMap.newKeySet(); // Track notified holes
+    private final Map<AABB, CoveredHoleInfo> coveredHoles = new ConcurrentHashMap<>();
+    private final Set<AABB> processedHoles = ConcurrentHashMap.newKeySet();
+    private final Set<AABB> pendingProcessing = ConcurrentHashMap.newKeySet();
+    private final Set<AABB> notifiedHoles = ConcurrentHashMap.newKeySet();
     private ExecutorService executorService;
-    private final List<Future<Map.Entry<Box, CoveredHoleInfo>>> pendingTasks = new ArrayList<>();
+    private final List<Future<Map.Entry<AABB, CoveredHoleInfo>>> pendingTasks = new ArrayList<>();
 
     private final Map<BlockPos, Boolean> solidBlockCache = new ConcurrentHashMap<>();
     private final Map<BlockPos, BlockState> blockStateCache = new ConcurrentHashMap<>();
@@ -80,7 +77,7 @@ public class CoveredHole extends Module {
     private int tickCounter = 0;
     private volatile boolean isScanning = false;
     private long lastCacheClear = 0;
-    private long lastCheckTime = 0; // Track last check time
+    private long lastCheckTime = 0;
     private String currentWorld = "";
 
     public CoveredHole() {
@@ -98,12 +95,10 @@ public class CoveredHole extends Module {
             return;
         }
 
-        // Clear all data when activating
         clearAllData();
 
-        // Track current world
-        if (mc.world != null) {
-            currentWorld = mc.world.getRegistryKey().getValue().toString();
+        if (mc.level != null) {
+            currentWorld = mc.level.dimension().location().toString();
         }
     }
 
@@ -120,11 +115,11 @@ public class CoveredHole extends Module {
         solidBlockCache.clear();
         blockStateCache.clear();
         pendingTasks.clear();
-        notifiedHoles.clear(); // Clear notified holes
+        notifiedHoles.clear();
         isScanning = false;
         tickCounter = 0;
         lastCacheClear = System.currentTimeMillis();
-        lastCheckTime = 0; // Reset last check time
+        lastCheckTime = 0;
     }
 
     private void shutdownExecutor() {
@@ -149,13 +144,13 @@ public class CoveredHole extends Module {
     }
 
     private void checkWorldChange() {
-        if (mc.world == null) {
+        if (mc.level == null) {
             currentWorld = "";
             clearAllData();
             return;
         }
 
-        String newWorld = mc.world.getRegistryKey().getValue().toString();
+        String newWorld = mc.level.dimension().location().toString();
         if (!newWorld.equals(currentWorld)) {
             currentWorld = newWorld;
             clearAllData();
@@ -166,7 +161,7 @@ public class CoveredHole extends Module {
     private void onTick(TickEvent.Post event) {
         checkWorldChange();
 
-        if (mc.world == null || mc.player == null) return;
+        if (mc.level == null || mc.player == null) return;
 
         if (holeESP == null || !holeESP.isActive()) {
             if (chatNotifications.get()) error("HoleTunnelStairsESP was disabled!");
@@ -176,20 +171,17 @@ public class CoveredHole extends Module {
 
         tickCounter++;
 
-        // Clean cache periodically
         long currentTime = System.currentTimeMillis();
         if (currentTime - lastCacheClear > 5000) {
             clearOldCacheEntries();
             lastCacheClear = currentTime;
         }
 
-        // Recheck for covered holes every 5 seconds
         if (currentTime - lastCheckTime > 5000) {
             startAsyncScan();
-            lastCheckTime = currentTime; // Update last check time
+            lastCheckTime = currentTime;
         }
 
-        // Process completed tasks every tick
         processCompletedTasks();
     }
 
@@ -203,63 +195,58 @@ public class CoveredHole extends Module {
     }
 
     private void startAsyncScan() {
-        Set<Box> holes = getHolesFromHoleESP();
+        Set<AABB> holes = getHolesFromHoleESP();
         if (holes == null || holes.isEmpty()) return;
 
         isScanning = true;
 
-        // Find new holes to process
-        List<Box> newHoles = new ArrayList<>();
-        for (Box hole : holes) {
+        List<AABB> newHoles = new ArrayList<>();
+        for (AABB hole : holes) {
             if (!processedHoles.contains(hole) && !pendingProcessing.contains(hole)) {
                 newHoles.add(hole);
                 pendingProcessing.add(hole);
             }
         }
 
-        // Start processing new holes
         int maxConcurrentTasks = Math.min(newHoles.size(), maxThreads.get());
         for (int i = 0; i < maxConcurrentTasks; i++) {
             if (i < newHoles.size()) {
-                Future<Map.Entry<Box, CoveredHoleInfo>> future =
+                Future<Map.Entry<AABB, CoveredHoleInfo>> future =
                     executorService.submit(new HoleCheckTask(newHoles.get(i)));
                 pendingTasks.add(future);
             }
         }
 
-        // Clean up old data
         coveredHoles.keySet().retainAll(holes);
         processedHoles.retainAll(holes);
         pendingProcessing.retainAll(holes);
     }
 
     private void processCompletedTasks() {
-        Iterator<Future<Map.Entry<Box, CoveredHoleInfo>>> iterator = pendingTasks.iterator();
+        Iterator<Future<Map.Entry<AABB, CoveredHoleInfo>>> iterator = pendingTasks.iterator();
         int processedCount = 0;
         final int maxProcessPerTick = 3;
 
         while (iterator.hasNext() && processedCount < maxProcessPerTick) {
-            Future<Map.Entry<Box, CoveredHoleInfo>> task = iterator.next();
+            Future<Map.Entry<AABB, CoveredHoleInfo>> task = iterator.next();
 
             if (task.isDone()) {
                 try {
-                    Map.Entry<Box, CoveredHoleInfo> result = task.get(1, TimeUnit.MILLISECONDS);
+                    Map.Entry<AABB, CoveredHoleInfo> result = task.get(1, TimeUnit.MILLISECONDS);
                     if (result != null) {
                         coveredHoles.put(result.getKey(), result.getValue());
                         pendingProcessing.remove(result.getKey());
 
-                        // Send notification only if not already notified
                         if (chatNotifications.get() && !notifiedHoles.contains(result.getKey())) {
-                            Box hole = result.getKey();
+                            AABB hole = result.getKey();
                             BlockPos coverPos = result.getValue().coverPos;
                             int depth = (int) (hole.maxY - hole.minY);
                             info(String.format("Covered Hole found at %s (depth: %d)",
                                 coverPos.toShortString(), depth));
-                            notifiedHoles.add(result.getKey()); // Mark as notified
+                            notifiedHoles.add(result.getKey());
                         }
                     }
                 } catch (Exception e) {
-                    // Silently handle task exceptions
                 } finally {
                     iterator.remove();
                     processedCount++;
@@ -272,7 +259,7 @@ public class CoveredHole extends Module {
         }
     }
 
-    private Set<Box> getHolesFromHoleESP() {
+    private Set<AABB> getHolesFromHoleESP() {
         try {
             return holeESP != null ? holeESP.getHoles() : Collections.emptySet();
         } catch (Exception e) {
@@ -282,14 +269,13 @@ public class CoveredHole extends Module {
 
     @EventHandler
     private void onRender3D(Render3DEvent event) {
-        if (mc.world == null) return;
+        if (mc.level == null) return;
 
-        for (Map.Entry<Box, CoveredHoleInfo> entry : coveredHoles.entrySet()) {
-            Box hole = entry.getKey();
+        for (Map.Entry<AABB, CoveredHoleInfo> entry : coveredHoles.entrySet()) {
+            AABB hole = entry.getKey();
             CoveredHoleInfo info = entry.getValue();
 
             try {
-                // Render the hole
                 event.renderer.box(
                     hole.minX, hole.minY, hole.minZ,
                     hole.maxX, hole.maxY, hole.maxZ,
@@ -297,7 +283,6 @@ public class CoveredHole extends Module {
                     shapeMode.get(), 0
                 );
 
-                // Render the cover block
                 event.renderer.box(
                     info.coverPos.getX(), info.coverPos.getY(), info.coverPos.getZ(),
                     info.coverPos.getX() + 1, info.coverPos.getY() + 1, info.coverPos.getZ() + 1,
@@ -305,22 +290,21 @@ public class CoveredHole extends Module {
                     shapeMode.get(), 0
                 );
             } catch (Exception e) {
-                // Silently handle rendering exceptions
             }
         }
     }
 
-    private class HoleCheckTask implements Callable<Map.Entry<Box, CoveredHoleInfo>> {
-        private final Box hole;
+    private class HoleCheckTask implements Callable<Map.Entry<AABB, CoveredHoleInfo>> {
+        private final AABB hole;
 
-        public HoleCheckTask(Box hole) {
+        public HoleCheckTask(AABB hole) {
             this.hole = hole;
         }
 
         @Override
-        public Map.Entry<Box, CoveredHoleInfo> call() {
+        public Map.Entry<AABB, CoveredHoleInfo> call() {
             try {
-                if (mc.world == null) return null;
+                if (mc.level == null) return null;
 
                 BlockPos topPos = new BlockPos(
                     (int) hole.minX,
@@ -343,7 +327,7 @@ public class CoveredHole extends Module {
             }
         }
 
-        private boolean isLikelyPlayerCovered(BlockPos coverPos, Box hole) {
+        private boolean isLikelyPlayerCovered(BlockPos coverPos, AABB hole) {
             try {
                 BlockState coverBlock = getBlockStateCached(coverPos);
                 if (coverBlock == null) return false;
@@ -376,7 +360,7 @@ public class CoveredHole extends Module {
         private boolean isCommonBuildingBlock(BlockState state) {
             if (state == null) return false;
 
-            String blockName = state.getBlock().getTranslationKey().toLowerCase();
+            String blockName = state.getBlock().getDescriptionId().toLowerCase();
             return blockName.contains("cobblestone") ||
                 blockName.contains("stone_brick") ||
                 blockName.contains("plank") ||
@@ -388,12 +372,12 @@ public class CoveredHole extends Module {
         }
 
         private boolean isSolidBlockCached(BlockPos pos) {
-            if (mc.world == null) return false;
+            if (mc.level == null) return false;
 
             return solidBlockCache.computeIfAbsent(pos, p -> {
                 try {
-                    BlockState state = mc.world.getBlockState(p);
-                    return state != null && state.isSolidBlock(mc.world, p);
+                    BlockState state = mc.level.getBlockState(p);
+                    return state != null && state.isRedstoneConductor(mc.level, p);
                 } catch (Exception e) {
                     return false;
                 }
@@ -401,11 +385,11 @@ public class CoveredHole extends Module {
         }
 
         private BlockState getBlockStateCached(BlockPos pos) {
-            if (mc.world == null) return null;
+            if (mc.level == null) return null;
 
             return blockStateCache.computeIfAbsent(pos, p -> {
                 try {
-                    return mc.world.getBlockState(p);
+                    return mc.level.getBlockState(p);
                 } catch (Exception e) {
                     return null;
                 }
@@ -415,9 +399,9 @@ public class CoveredHole extends Module {
 
     private static class CoveredHoleInfo {
         public final BlockPos coverPos;
-        public final Box holeBox;
+        public final AABB holeBox;
 
-        public CoveredHoleInfo(BlockPos coverPos, Box holeBox) {
+        public CoveredHoleInfo(BlockPos coverPos, AABB holeBox) {
             this.coverPos = coverPos;
             this.holeBox = holeBox;
         }

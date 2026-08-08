@@ -1,36 +1,18 @@
 package com.nnpg.glazed.utils;
 
-import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.world.entity.player.Inventory;
 
-import java.lang.reflect.Field;
-
+// was reflection on "selectedSlot" but that name gets remapped at runtime so it just returned 0
+// forever. shieldbreaker + breachswap were swapping to slot 0 this whole time
 public final class InventoryUtils {
-    private static Field selectedSlotField;
-
-    static {
-        try {
-            selectedSlotField = PlayerInventory.class.getDeclaredField("selectedSlot");
-            selectedSlotField.setAccessible(true);
-        } catch (NoSuchFieldException e) {
-            selectedSlotField = null;
-        }
-    }
 
     private InventoryUtils() {}
 
-    public static int getSelectedSlot(PlayerInventory inv) {
-        if (selectedSlotField == null) return 0;
-        try {
-            return selectedSlotField.getInt(inv);
-        } catch (IllegalAccessException e) {
-            return 0;
-        }
+    public static int getSelectedSlot(Inventory inv) {
+        return inv.selected;
     }
 
-    public static void setSelectedSlot(PlayerInventory inv, int slot) {
-        if (selectedSlotField == null) return;
-        try {
-            selectedSlotField.setInt(inv, slot);
-        } catch (IllegalAccessException ignored) {}
+    public static void setSelectedSlot(Inventory inv, int slot) {
+        inv.selected = slot;
     }
 }

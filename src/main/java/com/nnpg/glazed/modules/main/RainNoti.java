@@ -1,5 +1,6 @@
 package com.nnpg.glazed.modules.main;
 
+import com.nnpg.glazed.utils.GlazedWebhook;
 import com.nnpg.glazed.GlazedAddon;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
@@ -12,14 +13,6 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.render.MeteorToast;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.MinecraftClient;
-
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
-import java.util.concurrent.CompletableFuture;
 
 public class RainNoti extends Module {
 
@@ -73,9 +66,6 @@ public class RainNoti extends Module {
     );
 
     private boolean wasRaining = false;
-    private final HttpClient httpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .build();
 
     public RainNoti() {
         super(GlazedAddon.CATEGORY, "rain-noti", "Notifies when it starts raining in-game.");
@@ -83,11 +73,10 @@ public class RainNoti extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
-        if (mc.world == null) return;
+        if (mc.level == null) return;
 
-        boolean raining = mc.world.isRaining();
+        boolean raining = mc.level.isRaining();
         if (raining && !wasRaining) {
-            // Just started raining
             notifyRainStart();
         }
         wasRaining = raining;
@@ -97,10 +86,10 @@ public class RainNoti extends Module {
         if (sendNotifications.get()) {
             switch (notificationMode.get()) {
                 case Chat -> info("It has started raining!");
-                case Toast -> mc.getToastManager().add(new MeteorToast(null, "Weather Alert", "It has started raining!"));
+                case Toast -> mc.getToastManager().addToast(new MeteorToast(null, "Weather Alert", "It has started raining!"));
                 case Both -> {
                     info("It has started raining!");
-                    mc.getToastManager().add(new MeteorToast(null, "Weather Alert", "It has started raining!"));
+                    mc.getToastManager().addToast(new MeteorToast(null, "Weather Alert", "It has started raining!"));
                 }
             }
         }
@@ -109,50 +98,25 @@ public class RainNoti extends Module {
     }
 
     private void sendWebhookNotification() {
-        String url = webhookUrl.get().trim();
-        if (url.isEmpty()) {
+        if (webhookUrl.get().trim().isEmpty()) {
             warning("Webhook URL not configured!");
             return;
         }
 
-        CompletableFuture.runAsync(() -> {
-            try {
-                String messageContent = "";
-                if (selfPing.get() && !discordId.get().trim().isEmpty()) {
-                    messageContent = String.format("<@%s>", discordId.get().trim());
-                }
+        String serverInfo = mc.getCurrentServer() != null ?
+            mc.getCurrentServer().ip : "Singleplayer";
 
-                String serverInfo = mc.getCurrentServerEntry() != null ?
-                    mc.getCurrentServerEntry().address : "Singleplayer";
-
-                String jsonPayload = String.format(
-                    "{\"content\":\"%s\",\"username\":\"RainNoti\"," +
-                        "\"avatar_url\":\"https://i.imgur.com/OL2y1cr.png\"," +
-                        "\"embeds\":[{\"title\":\"🌧 Rain Started!\"," +
-                        "\"description\":\"It has started raining in-game.\"," +
-                        "\"color\":3447003," +
-                        "\"fields\":[{\"name\":\"Server\",\"value\":\"%s\",\"inline\":true}," +
-                        "{\"name\":\"Time\",\"value\":\"<t:%d:R>\",\"inline\":true}]," +
-                        "\"footer\":{\"text\":\"RainNoti\"}}]}",
-                    messageContent, serverInfo, System.currentTimeMillis() / 1000
-                );
-
-                HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-                    .timeout(Duration.ofSeconds(30))
-                    .build();
-
-                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-                if (response.statusCode() == 204) info("Webhook notification sent successfully");
-                else error("Webhook failed with status: " + response.statusCode());
-
-            } catch (Exception e) {
-                error("Failed to send webhook: " + e.getMessage());
-            }
-        });
+        GlazedWebhook.to(webhookUrl.get())
+            .username("RainNoti")
+            .ping(selfPing.get() ? discordId.get() : null)
+            .title("🌧 Rain Started!")
+            .description("It has started raining in-game.")
+            .color(3447003)
+            .field("Server", serverInfo, true)
+            .field("Time", "<t:" + (System.currentTimeMillis() / 1000) + ":R>", true)
+            .footer("RainNoti")
+            .onError(message -> error("Failed to send webhook: " + message))
+            .send();
     }
 
     @Override

@@ -6,16 +6,14 @@ import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.ingame.GenericContainerScreen;
-import net.minecraft.item.Item;
-import net.minecraft.item.Items;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.screen.slot.SlotActionType;
+import net.minecraft.client.gui.screens.inventory.ContainerScreen;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 
 public class OrderDropper extends Module {
-    private final MinecraftClient mc = MinecraftClient.getInstance();
 
     private enum Stage {
         NONE, OPEN_ORDERS, WAIT_ORDERS_GUI, CLICK_SLOT_51, WAIT_SECOND_GUI,
@@ -69,7 +67,7 @@ public class OrderDropper extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null || mc.gameMode == null) return;
 
         long now = System.currentTimeMillis();
 
@@ -82,7 +80,7 @@ public class OrderDropper extends Module {
 
             case WAIT_ORDERS_GUI -> {
                 if (now - stageStart < delay.get()) return;
-                if (mc.currentScreen instanceof GenericContainerScreen) {
+                if (mc.screen instanceof ContainerScreen) {
                     stage = Stage.CLICK_SLOT_51;
                     stageStart = now;
                 } else if (now - stageStart > 3000) {
@@ -93,10 +91,10 @@ public class OrderDropper extends Module {
 
             case CLICK_SLOT_51 -> {
                 if (now - stageStart < delay.get()) return;
-                if (!(mc.currentScreen instanceof GenericContainerScreen screen)) return;
-                ScreenHandler handler = screen.getScreenHandler();
+                if (!(mc.screen instanceof ContainerScreen screen)) return;
+                AbstractContainerMenu handler = screen.getMenu();
                 if (handler.slots.size() > 51) {
-                    mc.interactionManager.clickSlot(handler.syncId, 51, 0, SlotActionType.PICKUP, mc.player);
+                    mc.gameMode.handleInventoryMouseClick(handler.containerId, 51, 0, ClickType.PICKUP, mc.player);
                     stage = Stage.WAIT_SECOND_GUI;
                     stageStart = now;
                 }
@@ -104,7 +102,7 @@ public class OrderDropper extends Module {
 
             case WAIT_SECOND_GUI -> {
                 if (now - stageStart < delay.get()) return;
-                if (mc.currentScreen instanceof GenericContainerScreen) {
+                if (mc.screen instanceof ContainerScreen) {
                     stage = Stage.CLICK_TARGET_ITEM;
                     stageStart = now;
                 } else if (now - stageStart > 3000) {
@@ -115,18 +113,18 @@ public class OrderDropper extends Module {
 
             case CLICK_TARGET_ITEM -> {
                 if (now - stageStart < delay.get()) return;
-                if (!(mc.currentScreen instanceof GenericContainerScreen screen)) return;
+                if (!(mc.screen instanceof ContainerScreen screen)) return;
                 if (targetItem.get() == null) {
                     error("Target item is null.");
                     toggle();
                     return;
                 }
-                ScreenHandler handler = screen.getScreenHandler();
+                AbstractContainerMenu handler = screen.getMenu();
                 foundTargetItem = false;
                 for (int i = 0; i < handler.slots.size(); i++) {
                     Slot slot = handler.slots.get(i);
-                    if (slot.hasStack() && slot.getStack().getItem() == targetItem.get()) {
-                        mc.interactionManager.clickSlot(handler.syncId, i, 0, SlotActionType.PICKUP, mc.player);
+                    if (slot.hasItem() && slot.getItem().getItem() == targetItem.get()) {
+                        mc.gameMode.handleInventoryMouseClick(handler.containerId, i, 0, ClickType.PICKUP, mc.player);
                         stage = Stage.WAIT_THIRD_GUI;
                         stageStart = now;
                         foundTargetItem = true;
@@ -141,7 +139,7 @@ public class OrderDropper extends Module {
 
             case WAIT_THIRD_GUI -> {
                 if (now - stageStart < delay.get()) return;
-                if (mc.currentScreen instanceof GenericContainerScreen) {
+                if (mc.screen instanceof ContainerScreen) {
                     stage = Stage.CLICK_SLOT_13;
                     stageStart = now;
                 } else if (now - stageStart > 3000) {
@@ -152,15 +150,15 @@ public class OrderDropper extends Module {
 
             case CLICK_SLOT_13 -> {
                 if (now - stageStart < delay.get()) return;
-                if (!(mc.currentScreen instanceof GenericContainerScreen screen)) return;
-                ScreenHandler handler = screen.getScreenHandler();
+                if (!(mc.screen instanceof ContainerScreen screen)) return;
+                AbstractContainerMenu handler = screen.getMenu();
 
                 if (handler.slots.size() > 13) {
                     Slot slot13 = handler.slots.get(13);
-                    if (slot13.hasStack() && slot13.getStack().getItem() == Items.CHEST) {
-                        mc.interactionManager.clickSlot(handler.syncId, 13, 0, SlotActionType.PICKUP, mc.player);
+                    if (slot13.hasItem() && slot13.getItem().getItem() == Items.CHEST) {
+                        mc.gameMode.handleInventoryMouseClick(handler.containerId, 13, 0, ClickType.PICKUP, mc.player);
                     } else if (handler.slots.size() > 15) {
-                        mc.interactionManager.clickSlot(handler.syncId, 15, 0, SlotActionType.PICKUP, mc.player);
+                        mc.gameMode.handleInventoryMouseClick(handler.containerId, 15, 0, ClickType.PICKUP, mc.player);
                     }
                     stage = Stage.WAIT_ITEMS_GUI;
                     stageStart = now;
@@ -169,7 +167,7 @@ public class OrderDropper extends Module {
 
             case WAIT_ITEMS_GUI -> {
                 if (now - stageStart < delay.get()) return;
-                if (mc.currentScreen instanceof GenericContainerScreen) {
+                if (mc.screen instanceof ContainerScreen) {
                     stage = Stage.CLICK_SLOT_52;
                     stageStart = now;
                 } else if (now - stageStart > 3000) {
@@ -180,10 +178,10 @@ public class OrderDropper extends Module {
 
             case CLICK_SLOT_52 -> {
                 if (now - stageStart < delay.get()) return;
-                if (!(mc.currentScreen instanceof GenericContainerScreen screen)) return;
-                ScreenHandler handler = screen.getScreenHandler();
+                if (!(mc.screen instanceof ContainerScreen screen)) return;
+                AbstractContainerMenu handler = screen.getMenu();
                 if (handler.slots.size() > 52) {
-                    mc.interactionManager.clickSlot(handler.syncId, 52, 0, SlotActionType.PICKUP, mc.player);
+                    mc.gameMode.handleInventoryMouseClick(handler.containerId, 52, 0, ClickType.PICKUP, mc.player);
                     stage = Stage.CLICK_SLOT_53;
                     stageStart = now;
                 }
@@ -191,20 +189,20 @@ public class OrderDropper extends Module {
 
             case CLICK_SLOT_53 -> {
                 if (now - stageStart < delay.get()) return;
-                if (!(mc.currentScreen instanceof GenericContainerScreen screen)) {
+                if (!(mc.screen instanceof ContainerScreen screen)) {
                     toggle();
                     return;
                 }
-                ScreenHandler handler = screen.getScreenHandler();
+                AbstractContainerMenu handler = screen.getMenu();
                 if (handler.slots.size() > 53) {
                     Slot nextPageSlot = handler.slots.get(53);
-                    if (nextPageSlot.hasStack() && nextPageSlot.getStack().getItem() == Items.ARROW) {
-                        mc.interactionManager.clickSlot(handler.syncId, 53, 0, SlotActionType.PICKUP, mc.player);
+                    if (nextPageSlot.hasItem() && nextPageSlot.getItem().getItem() == Items.ARROW) {
+                        mc.gameMode.handleInventoryMouseClick(handler.containerId, 53, 0, ClickType.PICKUP, mc.player);
                         stage = Stage.CLICK_SLOT_52;
                         stageStart = now;
                     } else {
                         if (handler.slots.size() > 52) {
-                            mc.interactionManager.clickSlot(handler.syncId, 52, 0, SlotActionType.PICKUP, mc.player);
+                            mc.gameMode.handleInventoryMouseClick(handler.containerId, 52, 0, ClickType.PICKUP, mc.player);
                         }
                         toggle();
                     }

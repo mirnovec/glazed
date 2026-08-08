@@ -1,5 +1,9 @@
 package com.nnpg.glazed.modules.esp;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.nnpg.glazed.utils.GlazedWebhook;
 import com.google.common.reflect.TypeToken;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -19,24 +23,29 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.render.MeteorToast;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.entity.*;
-import net.minecraft.item.Items;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.ChunkPos;
-
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
+import net.minecraft.world.level.block.entity.BarrelBlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.entity.ChestBlockEntity;
+import net.minecraft.world.level.block.entity.DispenserBlockEntity;
+import net.minecraft.world.level.block.entity.EnderChestBlockEntity;
+import net.minecraft.world.level.block.entity.HopperBlockEntity;
+import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
+import net.minecraft.world.level.block.entity.SpawnerBlockEntity;
 import java.io.*;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
 
 public class AdvancedStashFinder extends Module {
+    private static final Logger LOG = LoggerFactory.getLogger("Glazed");
+
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -129,9 +138,6 @@ public class AdvancedStashFinder extends Module {
     );
 
     public List<Chunk> chunks = new ArrayList<>();
-    private final HttpClient httpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .build();
 
     public AdvancedStashFinder() {
         super(GlazedAddon.esp, "advanced-stash-finder", "Advanced stash finder with webhook support and auto-disconnect.");
@@ -153,7 +159,7 @@ public class AdvancedStashFinder extends Module {
         for (BlockEntity blockEntity : event.chunk().getBlockEntities().values()) {
             BlockEntityType<?> type = blockEntity.getType();
 
-            if (blockEntity instanceof MobSpawnerBlockEntity) {
+            if (blockEntity instanceof SpawnerBlockEntity) {
                 chunk.spawners++;
                 continue;
             }
@@ -202,12 +208,12 @@ public class AdvancedStashFinder extends Module {
                     case Chat -> info("Found %s at (highlight)%s(default), (highlight)%s(default). %s", stashType, chunk.x, chunk.z, detectionReason);
                     case Toast -> {
                         MeteorToast toast = new MeteorToast(Items.CHEST, title, "Found " + stashType.substring(0, 1).toUpperCase() + stashType.substring(1) + "!");
-                        mc.getToastManager().add(toast);
+                        mc.getToastManager().addToast(toast);
                     }
                     case Both -> {
                         info("Found %s at (highlight)%s(default), (highlight)%s(default). %s", stashType, chunk.x, chunk.z, detectionReason);
                         MeteorToast toast = new MeteorToast(Items.CHEST, title, "Found " + stashType.substring(0, 1).toUpperCase() + stashType.substring(1) + "!");
-                        mc.getToastManager().add(toast);
+                        mc.getToastManager().addToast(toast);
                     }
                 }
             }
@@ -217,107 +223,61 @@ public class AdvancedStashFinder extends Module {
             }
 
             if (disconnectOnFind.get() && isNewOrUpdated) {
-                //info("Base Found - Disconnecting at (highlight)%s(default), (highlight)%s(default)", chunk.x, chunk.z);
                 toggle();
 
-                if (mc.world != null) {
-                    mc.world.disconnect();
+                if (mc.level != null) {
+                    mc.level.disconnect();
                 }
             }
         }
     }
 
     private void sendWebhookNotification(Chunk chunk, boolean isCriticalSpawner, String detectionReason) {
-        String url = webhookUrl.get().trim();
-        if (url.isEmpty()) {
+        if (webhookUrl.get().trim().isEmpty()) {
             warning("Webhook URL not configured!");
             return;
         }
 
-        CompletableFuture.runAsync(() -> {
-            try {
-                String serverInfo = mc.getCurrentServerEntry() != null ?
-                    mc.getCurrentServerEntry().address : "Unknown Server";
+        String serverInfo = mc.getCurrentServer() != null ?
+            mc.getCurrentServer().ip : "Unknown Server";
 
-                String messageContent = "";
-                if (selfPing.get() && !discordId.get().trim().isEmpty()) {
-                    messageContent = String.format("<@%s>", discordId.get().trim());
-                }
+        String stashType = isCriticalSpawner ? "Spawner Base" : "Stash";
 
-                String stashType = isCriticalSpawner ? "Spawner Base" : "Stash";
-                String description = String.format("%s found at coordinates %d, %d!", stashType, chunk.x, chunk.z);
+        StringBuilder itemsFound = new StringBuilder();
+        int totalItems = 0;
 
-                StringBuilder itemsFound = new StringBuilder();
-                int totalItems = 0;
+        if (chunk.spawners > 0) { itemsFound.append("Spawners: ").append(chunk.spawners).append("\n"); totalItems += chunk.spawners; }
+        if (chunk.chests > 0) { itemsFound.append("Chests: ").append(chunk.chests).append("\n"); totalItems += chunk.chests; }
+        if (chunk.barrels > 0) { itemsFound.append("Barrels: ").append(chunk.barrels).append("\n"); totalItems += chunk.barrels; }
+        if (chunk.shulkers > 0) { itemsFound.append("Shulker Boxes: ").append(chunk.shulkers).append("\n"); totalItems += chunk.shulkers; }
+        if (chunk.enderChests > 0) { itemsFound.append("Ender Chests: ").append(chunk.enderChests).append("\n"); totalItems += chunk.enderChests; }
+        if (chunk.furnaces > 0) { itemsFound.append("Furnaces: ").append(chunk.furnaces).append("\n"); totalItems += chunk.furnaces; }
+        if (chunk.dispensersDroppers > 0) { itemsFound.append("Dispensers/Droppers: ").append(chunk.dispensersDroppers).append("\n"); totalItems += chunk.dispensersDroppers; }
+        if (chunk.hoppers > 0) { itemsFound.append("Hoppers: ").append(chunk.hoppers).append("\n"); totalItems += chunk.hoppers; }
 
-                if (chunk.spawners > 0) { itemsFound.append("Spawners: ").append(chunk.spawners).append("\\n"); totalItems += chunk.spawners; }
-                if (chunk.chests > 0) { itemsFound.append("Chests: ").append(chunk.chests).append("\\n"); totalItems += chunk.chests; }
-                if (chunk.barrels > 0) { itemsFound.append("Barrels: ").append(chunk.barrels).append("\\n"); totalItems += chunk.barrels; }
-                if (chunk.shulkers > 0) { itemsFound.append("Shulker Boxes: ").append(chunk.shulkers).append("\\n"); totalItems += chunk.shulkers; }
-                if (chunk.enderChests > 0) { itemsFound.append("Ender Chests: ").append(chunk.enderChests).append("\\n"); totalItems += chunk.enderChests; }
-                if (chunk.furnaces > 0) { itemsFound.append("Furnaces: ").append(chunk.furnaces).append("\\n"); totalItems += chunk.furnaces; }
-                if (chunk.dispensersDroppers > 0) { itemsFound.append("Dispensers/Droppers: ").append(chunk.dispensersDroppers).append("\\n"); totalItems += chunk.dispensersDroppers; }
-                if (chunk.hoppers > 0) { itemsFound.append("Hoppers: ").append(chunk.hoppers).append("\\n"); totalItems += chunk.hoppers; }
-
-                String jsonPayload = String.format(
-                    "{\"content\":\"%s\"," +
-                        "\"username\":\"Advanced Stashfinder\"," +
-                        "\"avatar_url\":\"https://i.imgur.com/OL2y1cr.png\"," +
-                        "\"embeds\":[{" +
-                        "\"title\":\"📦 Advanced Stashfinder Alert\"," +
-                        "\"description\":\"%s\"," +
-                        "\"color\":%d," +
-                        "\"fields\":[" +
-                        "{\"name\":\"Detection Reason\",\"value\":\"%s\",\"inline\":false}," +
-                        "{\"name\":\"Total Items Found\",\"value\":\"%d\",\"inline\":false}," +
-                        "{\"name\":\"Items Breakdown\",\"value\":\"%s\",\"inline\":false}," +
-                        "{\"name\":\"Coordinates\",\"value\":\"%d, %d\",\"inline\":true}," +
-                        "{\"name\":\"Server\",\"value\":\"%s\",\"inline\":true}," +
-                        "{\"name\":\"Time\",\"value\":\"<t:%d:R>\",\"inline\":true}" +
-                        "]," +
-                        "\"footer\":{\"text\":\"Advanced Stashfinder\"}" +
-                        "}]}",
-                    messageContent.replace("\"", "\\\""),
-                    description.replace("\"", "\\\""),
-                    isCriticalSpawner ? 16711680 : 3066993, // Red for spawner bases, blue for regular stashes
-                    detectionReason.replace("\"", "\\\""),
-                    totalItems,
-                    itemsFound.toString().replace("\"", "\\\""),
-                    chunk.x, chunk.z,
-                    serverInfo.replace("\"", "\\\""),
-                    System.currentTimeMillis() / 1000
-                );
-
-                HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-                    .timeout(Duration.ofSeconds(30))
-                    .build();
-
-                HttpResponse<String> response = httpClient.send(request,
-                    HttpResponse.BodyHandlers.ofString());
-
-                if (response.statusCode() == 204) {
-                    info("Webhook notification sent successfully");
-                } else {
-                    error("Webhook failed with status: " + response.statusCode());
-                }
-
-            } catch (IOException | InterruptedException e) {
-                error("Failed to send webhook: " + e.getMessage());
-            }
-        });
+        GlazedWebhook.to(webhookUrl.get())
+            .username("Advanced Stashfinder")
+            .ping(selfPing.get() ? discordId.get() : null)
+            .title("📦 Advanced Stashfinder Alert")
+            .description(String.format("%s found at coordinates %d, %d!", stashType, chunk.x, chunk.z))
+            .color(isCriticalSpawner ? 16711680 : 3066993)
+            .field("Detection Reason", detectionReason, false)
+            .field("Total Items Found", String.valueOf(totalItems), false)
+            .field("Items Breakdown", itemsFound.toString(), false)
+            .field("Coordinates", chunk.x + ", " + chunk.z, true)
+            .field("Server", serverInfo, true)
+            .field("Time", "<t:" + (System.currentTimeMillis() / 1000) + ":R>", true)
+            .footer("Advanced Stashfinder")
+            .onError(message -> error("Failed to send webhook: " + message))
+            .send();
     }
 
     @Override
     public WWidget getWidget(GuiTheme theme) {
-        // Sort
         chunks.sort(Comparator.comparingInt(value -> -value.getTotal()));
 
         WVerticalList list = theme.verticalList();
 
-        // Clear
         WButton clear = list.add(theme.button("Clear")).widget();
 
         WTable table = new WTable();
@@ -328,7 +288,6 @@ public class AdvancedStashFinder extends Module {
             table.clear();
         };
 
-        // Chunks
         fillTable(theme, table);
 
         return list;
@@ -363,7 +322,6 @@ public class AdvancedStashFinder extends Module {
     private void load() {
         boolean loaded = false;
 
-        // Try to load json
         File file = getJsonFile();
         if (file.exists()) {
             try {
@@ -374,12 +332,12 @@ public class AdvancedStashFinder extends Module {
                 for (Chunk chunk : chunks) chunk.calculatePos();
 
                 loaded = true;
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                LOG.warn("Could not load saved stash data", e);
                 if (chunks == null) chunks = new ArrayList<>();
             }
         }
 
-        // Try to load csv
         file = getCsvFile();
         if (!loaded && file.exists()) {
             try {
@@ -406,7 +364,8 @@ public class AdvancedStashFinder extends Module {
                 }
 
                 reader.close();
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                LOG.warn("Could not load saved stash data", e);
                 if (chunks == null) chunks = new ArrayList<>();
             }
         }
@@ -423,7 +382,7 @@ public class AdvancedStashFinder extends Module {
 
             writer.close();
         } catch (IOException e) {
-            e.printStackTrace();
+            LOG.error("Unhandled error in " + getClass().getSimpleName(), e);
         }
     }
 
@@ -435,7 +394,7 @@ public class AdvancedStashFinder extends Module {
             GSON.toJson(chunks, writer);
             writer.close();
         } catch (IOException e) {
-            e.printStackTrace();
+            LOG.error("Unhandled error in " + getClass().getSimpleName(), e);
         }
     }
 
@@ -519,7 +478,6 @@ public class AdvancedStashFinder extends Module {
         public void initWidgets() {
             WTable t = add(theme.table()).expandX().widget();
 
-            // Total
             t.add(theme.label("Total:"));
             t.add(theme.label(chunk.getTotal() + ""));
             t.row();
@@ -527,7 +485,6 @@ public class AdvancedStashFinder extends Module {
             t.add(theme.horizontalSeparator()).expandX();
             t.row();
 
-            // Separate
             t.add(theme.label("Chests:"));
             t.add(theme.label(chunk.chests + ""));
             t.row();

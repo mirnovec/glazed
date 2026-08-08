@@ -3,13 +3,13 @@ package com.nnpg.glazed.modules.main;
 import com.nnpg.glazed.GlazedAddon;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.world.scores.DisplaySlot;
+import net.minecraft.world.scores.Objective;
+import net.minecraft.world.scores.Scoreboard;
 import meteordevelopment.meteorclient.events.world.TickEvent;
-import net.minecraft.scoreboard.Scoreboard;
-import net.minecraft.scoreboard.ScoreboardObjective;
-import net.minecraft.scoreboard.ScoreboardDisplaySlot;
 
 public class HideScoreboard extends Module {
-    private ScoreboardObjective savedObjective = null;
+    private Objective savedObjective = null;
 
     public HideScoreboard() {
         super(GlazedAddon.CATEGORY, "hide-scoreboard", "Hides the sidebar scoreboard.");
@@ -17,24 +17,22 @@ public class HideScoreboard extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.world == null) return;
+        if (mc.level == null) return;
 
-        Scoreboard scoreboard = mc.world.getScoreboard();
-        ScoreboardObjective current = scoreboard.getObjectiveForSlot(ScoreboardDisplaySlot.SIDEBAR);
+        Scoreboard scoreboard = mc.level.getScoreboard();
+        Objective current = scoreboard.getDisplayObjective(DisplaySlot.SIDEBAR);
 
         if (current != null) {
-            // Save it once
             if (savedObjective == null) savedObjective = current;
-            scoreboard.setObjectiveSlot(ScoreboardDisplaySlot.SIDEBAR, null);
+            scoreboard.setDisplayObjective(DisplaySlot.SIDEBAR, null);
         }
     }
 
     @Override
     public void onDeactivate() {
-        if (mc.world == null || savedObjective == null) return;
+        if (mc.level == null || savedObjective == null) return;
 
-        // Restore the scoreboard
-        mc.world.getScoreboard().setObjectiveSlot(ScoreboardDisplaySlot.SIDEBAR, savedObjective);
+        mc.level.getScoreboard().setDisplayObjective(DisplaySlot.SIDEBAR, savedObjective);
         savedObjective = null;
     }
 }

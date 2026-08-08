@@ -1,29 +1,28 @@
 package com.nnpg.glazed.modules.main;
 
 import com.nnpg.glazed.GlazedAddon;
+import com.nnpg.glazed.utils.GlazedSell;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.block.Block;
-import net.minecraft.block.SpawnerBlock;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.ingame.GenericContainerScreen;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.slot.SlotActionType;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.item.Items;
-import net.minecraft.util.math.Vec3d;
-
+import net.minecraft.client.gui.screens.inventory.ContainerScreen;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.ChestMenu;
+import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.SpawnerBlock;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
 public class SpawnerOrder extends Module {
-    private final MinecraftClient mc = MinecraftClient.getInstance();
 
     private enum State {
         INVENTORY_CHECK,
@@ -90,7 +89,7 @@ public class SpawnerOrder extends Module {
         super(GlazedAddon.CATEGORY, "spawner-order", "Order All Spawner Loot.");
     }
 
-    private boolean isGreenGlass(net.minecraft.item.ItemStack stack) {
+    private boolean isGreenGlass(net.minecraft.world.item.ItemStack stack) {
         return stack.getItem() == Items.LIME_STAINED_GLASS_PANE ||
             stack.getItem() == Items.GREEN_STAINED_GLASS_PANE;
     }
@@ -108,8 +107,8 @@ public class SpawnerOrder extends Module {
         boolean hasBones = false;
         boolean hasArrows = false;
 
-        for (int i = 0; i < mc.player.getInventory().size(); i++) {
-            var stack = mc.player.getInventory().getStack(i);
+        for (int i = 0; i < mc.player.getInventory().getContainerSize(); i++) {
+            var stack = mc.player.getInventory().getItem(i);
             if (!stack.isEmpty()) {
                 String itemName = stack.getItem().getName().getString().toLowerCase();
                 if (itemName.contains("bone")) {
@@ -148,10 +147,10 @@ public class SpawnerOrder extends Module {
 
     @Override
     public void onDeactivate() {
-        if (mc.currentScreen != null) {
-            mc.player.closeHandledScreen();
+        if (mc.screen != null) {
+            mc.player.closeContainer();
         }
-        mc.player.setPitch(0f);
+        mc.player.setXRot(0f);
         if (notifications.get()) {
             ChatUtils.info("SpawnerOrder deactivated");
         }
@@ -159,7 +158,7 @@ public class SpawnerOrder extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.level == null || mc.gameMode == null) return;
 
         tickCounter++;
         waitCounter++;
@@ -256,8 +255,8 @@ public class SpawnerOrder extends Module {
     }
 
     private boolean hasItemsToSell() {
-        for (int i = 0; i < mc.player.getInventory().size(); i++) {
-            var stack = mc.player.getInventory().getStack(i);
+        for (int i = 0; i < mc.player.getInventory().getContainerSize(); i++) {
+            var stack = mc.player.getInventory().getItem(i);
             if (!stack.isEmpty()) {
                 String itemName = stack.getItem().getName().getString().toLowerCase();
                 if (itemName.contains("bone") || itemName.contains("arrow")) {
@@ -298,7 +297,7 @@ public class SpawnerOrder extends Module {
             return;
         }
 
-        double distance = mc.player.getPos().distanceTo(Vec3d.ofCenter(targetSpawner));
+        double distance = mc.player.position().distanceTo(Vec3.atCenterOf(targetSpawner));
 
         if (distance <= 4.5) {
             currentState = State.OPENING;
@@ -309,7 +308,7 @@ public class SpawnerOrder extends Module {
     }
 
     private void handleOpening() {
-        if (mc.currentScreen instanceof GenericContainerScreen) {
+        if (mc.screen instanceof ContainerScreen) {
             currentState = State.DROPPING;
             currentSpawnerPageCounter = 0;
             if (notifications.get()) {
@@ -324,22 +323,22 @@ public class SpawnerOrder extends Module {
     }
 
     private void handleDropping() {
-        if (!(mc.currentScreen instanceof GenericContainerScreen screen)) {
+        if (!(mc.screen instanceof ContainerScreen screen)) {
             currentState = State.OPENING;
             return;
         }
 
-        mc.player.setPitch(90f);
+        mc.player.setXRot(90f);
 
-        ScreenHandler handler = screen.getScreenHandler();
+        AbstractContainerMenu handler = screen.getMenu();
 
 
         if (handler.slots.size() > 50) {
-            mc.interactionManager.clickSlot(
-                handler.syncId,
+            mc.gameMode.handleInventoryMouseClick(
+                handler.containerId,
                 50,
                 0,
-                SlotActionType.PICKUP,
+                ClickType.PICKUP,
                 mc.player
             );
 
@@ -352,11 +351,11 @@ public class SpawnerOrder extends Module {
 
             if (currentSpawnerPageCounter < spawnerPagesToProcess.get()) {
                 if (handler.slots.size() > 53) {
-                    mc.interactionManager.clickSlot(
-                        handler.syncId,
+                    mc.gameMode.handleInventoryMouseClick(
+                        handler.containerId,
                         53,
                         0,
-                        SlotActionType.PICKUP,
+                        ClickType.PICKUP,
                         mc.player
                     );
                     if (notifications.get()) {
@@ -394,11 +393,11 @@ public class SpawnerOrder extends Module {
     }
 
     private void handleClosingGui() {
-        if (mc.currentScreen != null) {
-            mc.player.closeHandledScreen();
+        if (mc.screen != null) {
+            mc.player.closeContainer();
         }
 
-        mc.player.setPitch(0f);
+        mc.player.setXRot(0f);
 
         spawnerIndex++;
         if (spawnerIndex < spawners.size()) {
@@ -433,8 +432,8 @@ public class SpawnerOrder extends Module {
             return;
         }
 
-        String item = currentItemsToSell.get(itemIndex);
-        ChatUtils.sendPlayerMsg("/order " + item);
+        // was /order <item>, now everything goes through /sell instead
+        GlazedSell.openSell();
 
         currentState = State.OPENING_ORDER;
         waitCounter = 0;
@@ -445,7 +444,7 @@ public class SpawnerOrder extends Module {
     }
 
     private void handleOpeningOrder() {
-        if (mc.currentScreen instanceof GenericContainerScreen) {
+        if (mc.screen instanceof ContainerScreen) {
             currentState = State.CLICKING_SLOT0;
             if (notifications.get()) {
                 ChatUtils.info("");
@@ -454,19 +453,26 @@ public class SpawnerOrder extends Module {
     }
 
     private void handleClickingSlot0() {
-        if (!(mc.currentScreen instanceof GenericContainerScreen screen)) {
+        if (!(mc.screen instanceof ContainerScreen screen)) {
             currentState = State.ORDER_COMMAND;
             return;
         }
 
-        ScreenHandler handler = screen.getScreenHandler();
+        AbstractContainerMenu handler = screen.getMenu();
+
+        // /sell wants the items dropped in and then confirmed, twice. items go anywhere except
+        // the bottom row, which is where the buttons live
+        if (handler instanceof ChestMenu container) {
+            if (GlazedSell.clickConfirm(container)) return;
+            if (GlazedSell.depositNext(container)) return;
+        }
 
         if (handler.slots.size() > 0) {
-            mc.interactionManager.clickSlot(
-                handler.syncId,
+            mc.gameMode.handleInventoryMouseClick(
+                handler.containerId,
                 0,
                 0,
-                SlotActionType.PICKUP,
+                ClickType.PICKUP,
                 mc.player
             );
 
@@ -480,14 +486,14 @@ public class SpawnerOrder extends Module {
     }
 
     private void handleDepositingItems() {
-        if (!(mc.currentScreen instanceof GenericContainerScreen screen)) {
+        if (!(mc.screen instanceof ContainerScreen screen)) {
             if (waitCounter > 20) {
                 currentState = State.WAITING_CONFIRM_GUI;
             }
             return;
         }
 
-        ScreenHandler handler = screen.getScreenHandler();
+        AbstractContainerMenu handler = screen.getMenu();
         List<String> currentItemsToSell = getAvailableItemsToSell();
         String item = currentItemsToSell.get(itemIndex);
         String itemSingular = item.replace("s", "");
@@ -497,15 +503,15 @@ public class SpawnerOrder extends Module {
 
         for (int i = 0; i < handler.slots.size(); i++) {
             var slot = handler.slots.get(i);
-            if (slot.inventory == mc.player.getInventory() &&
-                !slot.getStack().isEmpty() &&
-                slot.getStack().getItem().getName().getString().toLowerCase().contains(itemSingular)) {
+            if (slot.container == mc.player.getInventory() &&
+                !slot.getItem().isEmpty() &&
+                slot.getItem().getItem().getName().getString().toLowerCase().contains(itemSingular)) {
 
-                mc.interactionManager.clickSlot(
-                    handler.syncId,
+                mc.gameMode.handleInventoryMouseClick(
+                    handler.containerId,
                     i,
                     0,
-                    SlotActionType.QUICK_MOVE,
+                    ClickType.QUICK_MOVE,
                     mc.player
                 );
                 depositedItems = true;
@@ -517,25 +523,25 @@ public class SpawnerOrder extends Module {
             if (notifications.get()) {
                 ChatUtils.info("");
             }
-            mc.player.closeHandledScreen();
+            mc.player.closeContainer();
             currentState = State.WAITING_CONFIRM_GUI;
             waitCounter = 0;
         } else if (waitCounter > 40) {
             if (notifications.get()) {
                 ChatUtils.info("");
             }
-            mc.player.closeHandledScreen();
+            mc.player.closeContainer();
             currentState = State.WAITING_CONFIRM_GUI;
             waitCounter = 0;
         }
     }
 
     private void handleWaitingConfirmGui() {
-        if (mc.currentScreen instanceof GenericContainerScreen screen) {
-            ScreenHandler handler = screen.getScreenHandler();
+        if (mc.screen instanceof ContainerScreen screen) {
+            AbstractContainerMenu handler = screen.getMenu();
 
             if (handler.slots.size() > 15) {
-                var stack = handler.getSlot(15).getStack();
+                var stack = handler.getSlot(15).getItem();
                 if (isGreenGlass(stack)) {
                     currentState = State.CONFIRMING_SALE;
                     if (notifications.get()) {
@@ -555,21 +561,21 @@ public class SpawnerOrder extends Module {
     }
 
     private void handleConfirmingSale() {
-        if (!(mc.currentScreen instanceof GenericContainerScreen screen)) {
+        if (!(mc.screen instanceof ContainerScreen screen)) {
             currentState = State.CLOSING_ORDER;
             return;
         }
 
-        ScreenHandler handler = screen.getScreenHandler();
+        AbstractContainerMenu handler = screen.getMenu();
 
         if (handler.slots.size() > 15) {
-            var stack = handler.getSlot(15).getStack();
+            var stack = handler.getSlot(15).getItem();
             if (isGreenGlass(stack)) {
-                mc.interactionManager.clickSlot(
-                    handler.syncId,
+                mc.gameMode.handleInventoryMouseClick(
+                    handler.containerId,
                     15,
                     0,
-                    SlotActionType.PICKUP,
+                    ClickType.PICKUP,
                     mc.player
                 );
 
@@ -590,8 +596,8 @@ public class SpawnerOrder extends Module {
     }
 
     private void handleClosingOrder() {
-        if (mc.currentScreen != null) {
-            mc.player.closeHandledScreen();
+        if (mc.screen != null) {
+            mc.player.closeContainer();
         }
 
         List<String> currentItemsToSell = getAvailableItemsToSell();
@@ -620,9 +626,9 @@ public class SpawnerOrder extends Module {
                 if (notifications.get()) {
                     ChatUtils.info("Cycle completed! Next cycle in " + dropDelayMinutes.get() + " minutes");
                 }
-                if (mc.currentScreen != null) {
-                    mc.player.closeHandledScreen();
-                    mc.player.closeHandledScreen();
+                if (mc.screen != null) {
+                    mc.player.closeContainer();
+                    mc.player.closeContainer();
                     if (notifications.get()) {
                         ChatUtils.info("");
                     }
@@ -632,9 +638,9 @@ public class SpawnerOrder extends Module {
     }
 
     private void handleWaitingCycle() {
-        if (mc.currentScreen != null) {
-            mc.player.closeHandledScreen();
-            mc.player.closeHandledScreen();
+        if (mc.screen != null) {
+            mc.player.closeContainer();
+            mc.player.closeContainer();
             if (notifications.get()) {
                 ChatUtils.info("");
             }
@@ -643,14 +649,14 @@ public class SpawnerOrder extends Module {
 
     private void scanForSpawners() {
         spawners.clear();
-        BlockPos playerPos = mc.player.getBlockPos();
+        BlockPos playerPos = mc.player.blockPosition();
         int radius = 5;
 
         for (int x = -radius; x <= radius; x++) {
             for (int y = -radius; y <= radius; y++) {
                 for (int z = -radius; z <= radius; z++) {
-                    BlockPos pos = playerPos.add(x, y, z);
-                    Block block = mc.world.getBlockState(pos).getBlock();
+                    BlockPos pos = playerPos.offset(x, y, z);
+                    Block block = mc.level.getBlockState(pos).getBlock();
                     if (block instanceof SpawnerBlock) {
                         spawners.add(pos);
                     }
@@ -662,12 +668,12 @@ public class SpawnerOrder extends Module {
     private void interactWithBlock(BlockPos pos) {
         try {
             BlockHitResult hitResult = new BlockHitResult(
-                Vec3d.ofCenter(pos),
-                mc.player.getHorizontalFacing().getOpposite(),
+                Vec3.atCenterOf(pos),
+                mc.player.getDirection().getOpposite(),
                 pos,
                 false
             );
-            mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hitResult);
+            mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, hitResult);
         } catch (Exception e) {
         }
     }
