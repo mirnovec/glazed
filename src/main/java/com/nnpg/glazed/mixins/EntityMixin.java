@@ -1,6 +1,7 @@
 package com.nnpg.glazed.mixins;
 
 import com.nnpg.glazed.modules.main.GlazedFreecam;
+import com.nnpg.glazed.modules.main.GlazedFreelook;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.world.entity.Entity;
 import org.spongepowered.asm.mixin.Mixin;
@@ -19,9 +20,18 @@ public class EntityMixin {
         if ((Object) this != mc.player) return;
 
         GlazedFreecam freecam = Modules.get().get(GlazedFreecam.class);
-        if (freecam == null || !freecam.isActive()) return;
 
-        freecam.updateRotation(cursorDeltaX * 0.15, cursorDeltaY * 0.15);
-        ci.cancel();
+        if (freecam != null && freecam.isActive()) {
+            freecam.updateRotation(cursorDeltaX * 0.15, cursorDeltaY * 0.15);
+            ci.cancel();
+            return;
+        }
+
+        GlazedFreelook freelook = Modules.get().get(GlazedFreelook.class);
+
+        if (freelook != null && freelook.isActive()) {
+            freelook.updateRotation(cursorDeltaX * 0.15, cursorDeltaY * 0.15);
+            ci.cancel();
+        }
     }
 }

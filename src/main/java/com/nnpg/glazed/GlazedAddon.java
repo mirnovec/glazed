@@ -70,22 +70,30 @@ public class GlazedAddon extends MeteorAddon {
         Modules.get().add(new FakePay());
         Modules.get().add(new FakeScoreboard());
         Modules.get().add(new GlazedFreecam());
+        Modules.get().add(new GlazedFreelook());
+        Modules.get().add(new GodTrident());
         Modules.get().add(new HideScoreboard());
         Modules.get().add(new HomeReset());
         Modules.get().add(new NoBlockInteract());
         Modules.get().add(new OrderDropper());
         Modules.get().add(new PlayerDetection());
+        Modules.get().add(new PlayerBypass());
         Modules.get().add(new PremiumTunnelBaseFinder());
+        Modules.get().add(new RTPBaseFinder());
+        Modules.get().add(new RTPEndBaseFinder());
+        Modules.get().add(new RTPNetherBaseFinder());
         Modules.get().add(new RTPer());
         Modules.get().add(new RainNoti());
         Modules.get().add(new ShulkerDropper());
         Modules.get().add(new SpawnerDropper());
         Modules.get().add(new SpawnerOrder());
         Modules.get().add(new SpawnerProtect());
+        Modules.get().add(new SpotifyHud());
         Modules.get().add(new TabDetector());
         Modules.get().add(new TpaMacro());
 
         // pvp
+        Modules.get().add(new AimAssist());
         Modules.get().add(new AnchorMacro());
         Modules.get().add(new AntiTrap());
         Modules.get().add(new AutoDoubleHand());

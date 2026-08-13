@@ -42,6 +42,7 @@ dependencies {
     modImplementation("meteordevelopment:meteor-client:${properties["minecraft_version"] as String}-SNAPSHOT")
     modImplementation("meteordevelopment:baritone:${properties["baritone_version"] as String}-SNAPSHOT")
     implementation("com.google.code.gson:gson:2.10.1")
+    include(implementation("com.github.LabyStudio:java-spotify-api:${properties["spotify_api_version"] as String}")!!)
     // ExploitPreventer by NikOverflow (MIT), shipped inside our jar so it always loads.
     // not added to the dev runtime because it hard-depends on the full fabric-api and we only
     // pull the few modules IAS needs
@@ -51,7 +52,7 @@ dependencies {
     runtimeOnly("dev.babbaj:nether-pathfinder:1.4.1")
     // ExploitPreventer hard-depends on the whole fabric-api, so dev needs all of it, not just the
     // couple of modules IAS wanted
-    modRuntimeOnly("net.fabricmc.fabric-api:fabric-api:0.141.3+1.21.11")
+    modRuntimeOnly("net.fabricmc.fabric-api:fabric-api:${properties["fabric_api_version"] as String}")
     modRuntimeOnly("com.nikoverflow:exploitpreventer:1.1.0")
     // exploitpreventer carries these two inside itself. fabric unpacks nested jars in a real
     // install but not for a dev mod, so without these it dies on its own IAPI class

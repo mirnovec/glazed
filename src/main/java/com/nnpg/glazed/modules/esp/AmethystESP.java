@@ -16,12 +16,12 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -32,7 +32,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-// flood fills amethyst and marks the chunk if the biggest blob is over the threshold
 public class AmethystESP extends Module {
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -70,6 +69,34 @@ public class AmethystESP extends Module {
         .sliderRange(-64, 320)
         .build());
 
+    private final Setting<Integer> scanRadius = sgGeneral.add(new IntSetting.Builder()
+        .name("scan-radius")
+        .description("How far around the middle of a geode to look for unlit spawnable space.")
+        .defaultValue(8)
+        .min(1)
+        .max(24)
+        .sliderRange(1, 24)
+        .build()
+    );
+
+    private final Setting<Boolean> linkGeodes = sgGeneral.add(new BoolSetting.Builder()
+        .name("link-geodes")
+        .description("Fill in the chunks between every pair of qualifying geodes.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Integer> linkThreshold = sgGeneral.add(new IntSetting.Builder()
+        .name("link-threshold")
+        .description("Hits a chunk needs before it counts as a link anchor.")
+        .defaultValue(12)
+        .min(1)
+        .max(100)
+        .sliderRange(1, 100)
+        .visible(linkGeodes::get)
+        .build()
+    );
+
     private final Setting<Boolean> notifications = sgGeneral.add(new BoolSetting.Builder()
         .name("notifications")
         .description("Toast when a new geode is found.")
@@ -100,6 +127,14 @@ public class AmethystESP extends Module {
         .defaultValue(new SettingColor(180, 100, 255, 60))
         .build());
 
+    private final Setting<SettingColor> linkColor = sgRender.add(new ColorSetting.Builder()
+        .name("link-color")
+        .description("Colour of the area drawn between linked geodes.")
+        .defaultValue(new SettingColor(180, 100, 255, 40))
+        .visible(linkGeodes::get)
+        .build()
+    );
+
     private final Setting<ShapeMode> shapeMode = sgRender.add(new EnumSetting.Builder<ShapeMode>()
         .name("shape-mode")
         .description("How the boxes are drawn.")
@@ -122,11 +157,14 @@ public class AmethystESP extends Module {
         .sliderRange(10, 400)
         .build());
 
+    private static final int MAX_HITS_PER_CHUNK = 9000;
+    private static final int NEIGHBOUR_LIGHT = 4;
     private static final int PRUNE_EXTRA_CHUNKS = 6;
     private static final int SCAN_INTERVAL_TICKS = 10;
 
     private final Set<Long> queuedChunks = ConcurrentHashMap.newKeySet();
     private final Set<ChunkPos> markedChunks = ConcurrentHashMap.newKeySet();
+    private final Set<ChunkPos> linkedChunks = ConcurrentHashMap.newKeySet();
     private final Map<ChunkPos, Set<BlockPos>> foundPositions = new ConcurrentHashMap<>();
     private final LinkedBlockingQueue<ChunkPos> scanQueue = new LinkedBlockingQueue<>();
     private final AtomicBoolean scannerRunning = new AtomicBoolean(false);
@@ -165,6 +203,7 @@ public class AmethystESP extends Module {
     private void reset() {
         queuedChunks.clear();
         markedChunks.clear();
+        linkedChunks.clear();
         foundPositions.clear();
         scanQueue.clear();
         pendingToasts.clear();
@@ -180,6 +219,7 @@ public class AmethystESP extends Module {
 
         drainScanQueue();
         pruneFarClusters();
+        rebuildLinks();
         showPendingToasts();
     }
 
@@ -212,7 +252,6 @@ public class AmethystESP extends Module {
 
         for (ChunkPos pos : batch) queuedChunks.remove(ChunkPos.asLong(pos.x, pos.z));
 
-        // grab the chunks here, doing it on the worker races with chunk unloading
         List<LevelChunk> chunks = new ArrayList<>(batch.size());
         for (ChunkPos pos : batch) {
             LevelChunk chunk = mc.level.getChunkSource().getChunkNow(pos.x, pos.z);
@@ -235,64 +274,161 @@ public class AmethystESP extends Module {
         });
     }
 
-    // flood fill lol
-    private void scanChunk(LevelChunk chunk, int fromY, int toY, int required) {
+    private BlockPos findGeodeCentre(LevelChunk chunk, int fromY, int toY) {
         ChunkPos chunkPos = chunk.getPos();
         int originX = chunkPos.getMinBlockX();
         int originZ = chunkPos.getMinBlockZ();
 
-        int bottom = Math.max(fromY, chunk.getMinY());
-        int top = Math.min(toY, chunk.getMinY() + chunk.getHeight() - 1);
+        long sumX = 0;
+        long sumY = 0;
+        long sumZ = 0;
+        int count = 0;
 
-        Set<BlockPos> amethyst = new HashSet<>();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
 
-        for (int y = bottom; y <= top; y++) {
+        for (int y = fromY; y <= toY; y++) {
             for (int x = 0; x < 16; x++) {
                 for (int z = 0; z < 16; z++) {
                     cursor.set(originX + x, y, originZ + z);
-                    if (isAmethystLike(chunk.getBlockState(cursor))) amethyst.add(cursor.immutable());
+                    BlockState state = chunk.getBlockState(cursor);
+
+                    if (!state.is(Blocks.AMETHYST_BLOCK) && !state.is(Blocks.BUDDING_AMETHYST)) continue;
+
+                    sumX += cursor.getX();
+                    sumY += cursor.getY();
+                    sumZ += cursor.getZ();
+                    count++;
                 }
             }
         }
 
-        if (amethyst.isEmpty()) {
-            foundPositions.remove(chunkPos);
-            markedChunks.remove(chunkPos);
+        if (count == 0) return null;
+        return new BlockPos((int) (sumX / count), (int) (sumY / count), (int) (sumZ / count));
+    }
+
+    private void scanChunk(LevelChunk chunk, int fromY, int toY, int required) {
+        ChunkPos chunkPos = chunk.getPos();
+        Level level = mc.level;
+
+        if (level == null) {
+            forget(chunkPos);
             return;
         }
 
-        Set<BlockPos> visited = new HashSet<>();
-        Set<BlockPos> hits = ConcurrentHashMap.newKeySet();
+        int bottom = Math.max(fromY, chunk.getMinY());
+        int top = Math.min(toY, chunk.getMinY() + chunk.getHeight() - 1);
 
-        for (BlockPos seed : amethyst) {
-            if (!visited.add(seed)) continue;
+        BlockPos centre = findGeodeCentre(chunk, bottom, top);
 
-            Set<BlockPos> geode = new HashSet<>();
-            Deque<BlockPos> queue = new ArrayDeque<>();
-            queue.add(seed);
-
-            while (!queue.isEmpty()) {
-                BlockPos current = queue.poll();
-                geode.add(current);
-
-                for (Direction direction : Direction.values()) {
-                    BlockPos next = current.relative(direction);
-                    if (amethyst.contains(next) && visited.add(next)) queue.add(next);
-                }
-            }
-
-            if (geode.size() >= required) hits.addAll(geode);
+        if (centre == null) {
+            forget(chunkPos);
+            return;
         }
 
+        Set<BlockPos> hits = darkSpots(level, centre);
+
         if (hits.isEmpty()) {
-            foundPositions.remove(chunkPos);
-            markedChunks.remove(chunkPos);
+            forget(chunkPos);
             return;
         }
 
         foundPositions.put(chunkPos, hits);
+
+        if (hits.size() < required) {
+            markedChunks.remove(chunkPos);
+            return;
+        }
+
         if (markedChunks.add(chunkPos) && notifications.get()) pendingToasts.add(chunkPos);
+    }
+
+    private Set<BlockPos> darkSpots(Level level, BlockPos centre) {
+        Set<BlockPos> hits = new HashSet<>();
+        int radius = scanRadius.get();
+
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        BlockPos.MutableBlockPos neighbour = new BlockPos.MutableBlockPos();
+
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -radius; dy <= radius; dy++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    if (hits.size() >= MAX_HITS_PER_CHUNK) return hits;
+
+                    cursor.set(centre.getX() + dx, centre.getY() + dy, centre.getZ() + dz);
+
+                    BlockState state = level.getBlockState(cursor);
+                    if (!state.is(Blocks.AIR) && !state.is(Blocks.AMETHYST_CLUSTER)) continue;
+                    if (level.getBrightness(LightLayer.BLOCK, cursor) != 0) continue;
+
+                    BlockPos darkAir = null;
+                    boolean lit = false;
+
+                    for (Direction direction : Direction.values()) {
+                        neighbour.set(cursor.getX() + direction.getStepX(), cursor.getY() + direction.getStepY(), cursor.getZ() + direction.getStepZ());
+                        int light = level.getBrightness(LightLayer.BLOCK, neighbour);
+
+                        if (light > NEIGHBOUR_LIGHT) {
+                            lit = true;
+                            break;
+                        }
+
+                        if (darkAir == null && light == 0 && level.getBlockState(neighbour).is(Blocks.AIR)) {
+                            darkAir = neighbour.immutable();
+                        }
+                    }
+
+                    if (lit || darkAir == null) continue;
+
+                    for (Direction direction : Direction.values()) {
+                        neighbour.set(darkAir.getX() + direction.getStepX(), darkAir.getY() + direction.getStepY(), darkAir.getZ() + direction.getStepZ());
+                        if (level.getBrightness(LightLayer.BLOCK, neighbour) > NEIGHBOUR_LIGHT) {
+                            lit = true;
+                            break;
+                        }
+                    }
+
+                    if (lit) continue;
+
+                    hits.add(cursor.immutable());
+                }
+            }
+        }
+
+        return hits;
+    }
+
+    private void forget(ChunkPos pos) {
+        foundPositions.remove(pos);
+        markedChunks.remove(pos);
+    }
+
+    private void rebuildLinks() {
+        linkedChunks.clear();
+        if (!linkGeodes.get()) return;
+
+        int need = linkThreshold.get();
+        List<ChunkPos> hot = new ArrayList<>();
+
+        for (Map.Entry<ChunkPos, Set<BlockPos>> entry : foundPositions.entrySet()) {
+            if (entry.getValue().size() >= need) hot.add(entry.getKey());
+        }
+
+        if (hot.isEmpty()) return;
+
+        linkedChunks.addAll(hot);
+
+        for (int i = 0; i < hot.size(); i++) {
+            for (int j = i + 1; j < hot.size(); j++) {
+                ChunkPos a = hot.get(i);
+                ChunkPos b = hot.get(j);
+
+                for (int x = Math.min(a.x, b.x); x <= Math.max(a.x, b.x); x++) {
+                    for (int z = Math.min(a.z, b.z); z <= Math.max(a.z, b.z); z++) {
+                        linkedChunks.add(new ChunkPos(x, z));
+                    }
+                }
+            }
+        }
     }
 
     private void pruneFarClusters() {
@@ -303,6 +439,7 @@ public class AmethystESP extends Module {
 
         foundPositions.keySet().removeIf(pos -> isOutside(pos, center, radius));
         markedChunks.removeIf(pos -> isOutside(pos, center, radius));
+        linkedChunks.removeIf(pos -> isOutside(pos, center, radius));
     }
 
     private static boolean isOutside(ChunkPos pos, ChunkPos center, int radius) {
@@ -324,17 +461,7 @@ public class AmethystESP extends Module {
 
     @EventHandler
     private void onBlockUpdate(BlockUpdateEvent event) {
-        ChunkPos chunkPos = new ChunkPos(event.pos);
-        Set<BlockPos> positions = foundPositions.get(chunkPos);
-        if (positions == null) return;
-
-        if (isAmethystLike(event.newState)) positions.add(event.pos.immutable());
-        else positions.remove(event.pos);
-
-        if (positions.isEmpty()) {
-            foundPositions.remove(chunkPos);
-            markedChunks.remove(chunkPos);
-        }
+        enqueueChunk(event.pos.getX() >> 4, event.pos.getZ() >> 4);
     }
 
     @EventHandler
@@ -352,6 +479,20 @@ public class AmethystESP extends Module {
                 event.renderer.box(pos.getMinBlockX(), lowY, pos.getMinBlockZ(),
                     pos.getMaxBlockX() + 1, highY, pos.getMaxBlockZ() + 1,
                     boxColor, boxColor, shapeMode.get(), 0);
+            }
+        }
+
+        if (linkGeodes.get() && !linkedChunks.isEmpty()) {
+            Color areaColor = new Color(linkColor.get());
+            int lowY = Math.min(minY.get(), maxY.get());
+            int highY = Math.max(minY.get(), maxY.get());
+
+            for (ChunkPos pos : linkedChunks) {
+                if (markedChunks.contains(pos)) continue;
+
+                event.renderer.box(pos.getMinBlockX(), lowY, pos.getMinBlockZ(),
+                    pos.getMaxBlockX() + 1, highY, pos.getMaxBlockZ() + 1,
+                    areaColor, areaColor, shapeMode.get(), 0);
             }
         }
 
@@ -373,9 +514,6 @@ public class AmethystESP extends Module {
         int drawn = 0;
         int tracerBudget = maxTracers.get();
 
-        // one line per geode, aimed at its middle. it used to draw a line to every single block
-        // which is hundreds of overlapping lines on one geode, and from getEyePos() which isnt
-        // interpolated so the whole lot jittered every tick
         for (Set<BlockPos> positions : foundPositions.values()) {
             if (positions.isEmpty()) continue;
             if (drawn++ >= tracerBudget) return;
@@ -391,15 +529,6 @@ public class AmethystESP extends Module {
             event.renderer.line(RenderUtils.center.x, RenderUtils.center.y, RenderUtils.center.z,
                 x / count, y / count, z / count, blockColor);
         }
-    }
-
-    private static boolean isAmethystLike(BlockState state) {
-        return state.is(Blocks.AMETHYST_CLUSTER)
-            || state.is(Blocks.LARGE_AMETHYST_BUD)
-            || state.is(Blocks.MEDIUM_AMETHYST_BUD)
-            || state.is(Blocks.SMALL_AMETHYST_BUD)
-            || state.is(Blocks.AMETHYST_BLOCK)
-            || state.is(Blocks.BUDDING_AMETHYST);
     }
 
     @Override

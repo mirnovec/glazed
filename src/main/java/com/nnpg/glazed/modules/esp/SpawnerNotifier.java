@@ -4,6 +4,7 @@ import com.nnpg.glazed.utils.GlazedWebhook;
 import com.nnpg.glazed.GlazedAddon;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.ChunkDataEvent;
+import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -149,6 +150,7 @@ public class SpawnerNotifier extends Module {
     private final Set<ChunkPos> processed_chunks = new HashSet<>();
     private final Set<BlockPos> found_spawner_positions = new HashSet<>();
     private final Set<BlockPos> new_found_spawners = new HashSet<>();
+    private int prune_ticks = 0;
 
     private int total_spawners_found = 0;
 
@@ -202,6 +204,35 @@ public class SpawnerNotifier extends Module {
     }
 
     @EventHandler
+    private void on_tick(TickEvent.Post event) {
+        if (mc.player == null || ++prune_ticks < 60) return;
+
+        prune_ticks = 0;
+        prune_distant();
+    }
+
+    private void prune_distant() {
+        int chunkRadius = mc.options.renderDistance().get() + 4;
+        int blockRadius = chunkRadius * 16;
+        long blockRadiusSq = (long) blockRadius * blockRadius;
+
+        int playerChunkX = mc.player.chunkPosition().x;
+        int playerChunkZ = mc.player.chunkPosition().z;
+        double px = mc.player.getX();
+        double pz = mc.player.getZ();
+
+        processed_chunks.removeIf(pos -> Math.abs(pos.x - playerChunkX) > chunkRadius || Math.abs(pos.z - playerChunkZ) > chunkRadius);
+
+        found_spawner_positions.removeIf(pos -> {
+            double dx = pos.getX() + 0.5 - px;
+            double dz = pos.getZ() + 0.5 - pz;
+            return dx * dx + dz * dz > blockRadiusSq;
+        });
+
+        new_found_spawners.retainAll(found_spawner_positions);
+    }
+
+    @EventHandler
     private void onRender(Render3DEvent event) {
         if (mc.player == null || (!show_esp.get() && !show_tracers.get())) return;
 
@@ -218,10 +249,11 @@ public class SpawnerNotifier extends Module {
             }
 
             if (maxDistance > 0) {
-                double distance = playerPos.distanceTo(Vec3.atCenterOf(pos));
-                if (distance > maxDistance) {
-                    continue;
-                }
+                double dx = pos.getX() + 0.5 - playerPos.x;
+                double dy = pos.getY() + 0.5 - playerPos.y;
+                double dz = pos.getZ() + 0.5 - playerPos.z;
+
+                if (dx * dx + dy * dy + dz * dz > maxDistance * maxDistance) continue;
             }
 
             if (show_esp.get()) {
