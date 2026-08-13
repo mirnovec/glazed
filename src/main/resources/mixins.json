@@ -11,7 +11,8 @@
     "InGameHudMixin",
     "CameraMixin",
     "EntityMixin",
-    "GameRendererMixin"
+    "GameRendererMixin",
+    "TridentItemMixin"
   ],
   "injectors": {
     "defaultRequire": 1

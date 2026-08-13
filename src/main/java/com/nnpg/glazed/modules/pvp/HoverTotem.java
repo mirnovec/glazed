@@ -2,29 +2,20 @@ package com.nnpg.glazed.modules.pvp;
 
 import com.nnpg.glazed.GlazedAddon;
 import com.nnpg.glazed.mixins.HandledScreenMixin;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
+import net.minecraft.network.protocol.game.ClientboundEntityEventPacket;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.Items;
 
 public class HoverTotem extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
-
-    private final Setting<Integer> tickDelay = sgGeneral.add(new IntSetting.Builder()
-        .name("tick-delay")
-        .description("Ticks to wait between operations.")
-        .defaultValue(0)
-        .min(0)
-        .max(20)
-        .sliderMin(0)
-        .sliderMax(20)
-        .build()
-    );
 
     private final Setting<Boolean> hotbarTotem = sgGeneral.add(new BoolSetting.Builder()
         .name("hotbar-totem")
@@ -51,7 +42,16 @@ public class HoverTotem extends Module {
         .build()
     );
 
-    private int remainingDelay;
+    private final Setting<Boolean> autoInvOpen = sgGeneral.add(new BoolSetting.Builder()
+        .name("auto-inv-open")
+        .description("Opens your inventory by itself when the offhand totem is gone, then closes it once a new one is equipped.")
+        .defaultValue(false)
+        .build()
+    );
+
+    private boolean shouldOpenInv;
+    private boolean totemEquipped;
+    private boolean wasAutoOpened;
 
     public HoverTotem() {
         super(GlazedAddon.pvp, "hover-totem", "Equips a totem in offhand and optionally hotbar when hovering over one in inventory.");
@@ -59,16 +59,73 @@ public class HoverTotem extends Module {
 
     @Override
     public void onActivate() {
-        resetDelay();
+        resetState();
+    }
+
+    @Override
+    public void onDeactivate() {
+        resetState();
+    }
+
+    @EventHandler
+    private void onPacket(PacketEvent.Receive event) {
+        if (!autoInvOpen.get() || mc.player == null || mc.level == null) return;
+        if (!(event.packet instanceof ClientboundEntityEventPacket packet)) return;
+        if (packet.getEventId() != 35 || packet.getEntity(mc.level) != mc.player) return;
+        if (mc.screen != null || !hasTotemInInventory()) return;
+
+        shouldOpenInv = true;
+        totemEquipped = false;
+        wasAutoOpened = true;
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.gameMode == null) return;
 
+        if (autoInvOpen.get() && mc.screen == null
+            && !mc.player.getOffhandItem().is(Items.TOTEM_OF_UNDYING)
+            && hasTotemInInventory()) {
+            shouldOpenInv = true;
+        }
+
+        if (shouldOpenInv && mc.screen == null) {
+            if (hasTotemInInventory()) {
+                mc.execute(() -> {
+                    if (mc.player == null) return;
+
+                    mc.setScreen(new InventoryScreen(mc.player));
+                    shouldOpenInv = false;
+                    totemEquipped = false;
+                    wasAutoOpened = true;
+                });
+            } else {
+                shouldOpenInv = false;
+            }
+
+            return;
+        }
+
         Screen currentScreen = mc.screen;
         if (!(currentScreen instanceof InventoryScreen inventoryScreen)) {
-            resetDelay();
+            if (wasAutoOpened && !totemEquipped && mc.player.getOffhandItem().is(Items.TOTEM_OF_UNDYING)) {
+                totemEquipped = true;
+                wasAutoOpened = false;
+            }
+
+            if (wasAutoOpened && !totemEquipped) shouldOpenInv = true;
+
+            return;
+        }
+
+        if (autoInvOpen.get() && !totemEquipped && mc.player.getOffhandItem().is(Items.TOTEM_OF_UNDYING)) {
+            totemEquipped = true;
+            wasAutoOpened = false;
+
+            mc.execute(() -> {
+                if (mc.player != null) mc.player.closeContainer();
+            });
+
             return;
         }
 
@@ -81,11 +138,6 @@ public class HoverTotem extends Module {
         }
 
         if (!focusedSlot.getItem().is(Items.TOTEM_OF_UNDYING)) return;
-
-        if (remainingDelay > 0) {
-            remainingDelay--;
-            return;
-        }
 
         int slotIndex = focusedSlot.getContainerSlot();
         int syncId = inventoryScreen.getMenu().containerId;
@@ -103,21 +155,30 @@ public class HoverTotem extends Module {
         }
     }
 
+    private boolean hasTotemInInventory() {
+        if (mc.player == null) return false;
+
+        for (int i = 0; i < 36; i++) {
+            if (mc.player.getInventory().getItem(i).is(Items.TOTEM_OF_UNDYING)) return true;
+        }
+
+        return false;
+    }
+
     private void equipOffhandTotem(int syncId, int slotIndex) {
         mc.gameMode.handleInventoryMouseClick(syncId, slotIndex, 40, ClickType.SWAP, mc.player);
-        resetDelay();
     }
 
     private void equipHotbarTotem(int syncId, int slotIndex, int hotbarIndex) {
         mc.gameMode.handleInventoryMouseClick(syncId, slotIndex, hotbarIndex, ClickType.SWAP, mc.player);
-        resetDelay();
     }
 
-    private void resetDelay() {
-        remainingDelay = tickDelay.get();
+    private void resetState() {
+        shouldOpenInv = false;
+        totemEquipped = false;
+        wasAutoOpened = false;
     }
 
-    // mixin always hits so the old reflection fallback never ran, and it checked the wrong class anyway
     private Slot getFocusedSlotSafe(InventoryScreen screen) {
         if (screen instanceof HandledScreenMixin mixin) {
             return mixin.glazed$getFocusedSlot();

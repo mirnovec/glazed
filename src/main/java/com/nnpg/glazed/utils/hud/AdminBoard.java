@@ -32,10 +32,9 @@ public final class AdminBoard {
     private static final long NEW_MS = 5000L;
 
     private static final int BACKGROUND = 0xF00A0A0E;
-    private static final int SHADOW = 0x60000000;
     private static final int BORDER = 0x1AFFFFFF;
     private static final int DIVIDER = 0x12FFFFFF;
-    private static final int ACCENT = 0xFFE11919;
+    private static final int ACCENT = 0xFFCBA6F7;
     private static final int NAME = 0xFFF2F2F8;
     private static final int COUNT = 0xFF8E8E9A;
     private static final int DOT = 0xFF55555F;
@@ -154,7 +153,6 @@ public final class AdminBoard {
         int face = Math.max(8, px(FACE, scale));
         int radius = Math.max(3, px(RADIUS, scale));
 
-        RoundRect.shadow(context, x, y, width, height, radius, SHADOW);
         RoundRect.draw(context, x, y, width, height, radius, BACKGROUND);
         RoundRect.stroke(context, x, y, width, height, radius, BORDER);
 

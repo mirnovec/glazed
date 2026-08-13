@@ -15,8 +15,7 @@ import net.minecraft.sounds.SoundEvents;
 import java.util.Locale;
 
 public class FakePay extends Module {
-    private static final int GRAY = 0xAAAAAA;
-    private static final int BLUE = 0x3FA0E0;
+    private static final int WHITE = 0xFFFFFF;
     private static final int GREEN = 0x55FF55;
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -81,10 +80,9 @@ public class FakePay extends Module {
         Double amount = MoneyFmt.parse(parts[2]);
         if (amount == null || amount <= 0) return false;
 
-        MutableComponent message = Component.literal("You paid ").withStyle(s -> s.withColor(GRAY))
-            .append(Component.literal(user).withStyle(s -> s.withColor(BLUE)))
-            .append(Component.literal(" $" + MoneyFmt.format(amount)).withStyle(s -> s.withColor(GREEN)))
-            .append(Component.literal(".").withStyle(s -> s.withColor(GRAY)));
+        MutableComponent message = Component.literal("You paid " + user + " ").withStyle(s -> s.withColor(WHITE))
+            .append(Component.literal("$").withStyle(s -> s.withColor(GREEN)))
+            .append(Component.literal(" " + MoneyFmt.format(amount)).withStyle(s -> s.withColor(WHITE)));
 
         mc.player.displayClientMessage(message, false);
         if (actionBar.get()) mc.player.displayClientMessage(message, true);

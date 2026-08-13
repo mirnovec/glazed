@@ -11,7 +11,7 @@
   "contact": {
     "homepage": "https://glazedclient.com",
     "repo": "https://github.com/realnnpg/",
-    "discord": "https://discord.gg/glazed"
+    "discord": "https://discord.gg/glazedclient"
   },
   "license": "All Rights Reserved",
   "icon": "assets/template/icon.png",
@@ -32,13 +32,14 @@
     "modmenu": {
       "links": {
         "modmenu.website": "https://glazedclient.com",
-        "modmenu.discord": "https://discord.gg/glazed"
+        "modmenu.discord": "https://discord.gg/glazedclient"
       }
     }
   },
   "depends": {
     "java": ">=21",
     "minecraft": ["${mc_version}"],
-    "meteor-client": "*"
+    "meteor-client": "*",
+    "fabric-api": "*"
   }
 }

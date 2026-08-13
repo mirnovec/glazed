@@ -4,6 +4,7 @@ import com.nnpg.glazed.utils.GlazedWebhook;
 import com.nnpg.glazed.GlazedAddon;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.ChunkDataEvent;
+import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -140,6 +141,7 @@ public class BlockNotifier extends Module {
     private final Set<BlockPos> found_block_positions = new HashSet<>();
     private final Set<BlockPos> new_found_blocks = new HashSet<>();
     private final Map<BlockPos, Block> block_type_map = new HashMap<>();
+    private int prune_ticks = 0;
 
     private int total_blocks_found = 0;
 
@@ -160,6 +162,31 @@ public class BlockNotifier extends Module {
     @Override
     public void onDeactivate() {
         if (notifications.get()) info("BlockNotifier deactivated. Found %d blocks total this session.", total_blocks_found);
+    }
+
+    @EventHandler
+    private void on_prune_tick(TickEvent.Post event) {
+        if (mc.player == null || ++prune_ticks < 60) return;
+
+        prune_ticks = 0;
+
+        int chunkRadius = mc.options.renderDistance().get() + 4;
+        long blockRadiusSq = (long) (chunkRadius * 16) * (chunkRadius * 16);
+        int playerChunkX = mc.player.chunkPosition().x;
+        int playerChunkZ = mc.player.chunkPosition().z;
+        double px = mc.player.getX();
+        double pz = mc.player.getZ();
+
+        processed_chunks.removeIf(pos -> Math.abs(pos.x - playerChunkX) > chunkRadius || Math.abs(pos.z - playerChunkZ) > chunkRadius);
+
+        found_block_positions.removeIf(pos -> {
+            double dx = pos.getX() + 0.5 - px;
+            double dz = pos.getZ() + 0.5 - pz;
+            return dx * dx + dz * dz > blockRadiusSq;
+        });
+
+        new_found_blocks.retainAll(found_block_positions);
+        block_type_map.keySet().retainAll(found_block_positions);
     }
 
     @EventHandler
@@ -219,10 +246,11 @@ public class BlockNotifier extends Module {
             }
 
             if (maxDistance > 0) {
-                double distance = playerPos.distanceTo(Vec3.atCenterOf(pos));
-                if (distance > maxDistance) {
-                    continue;
-                }
+                double dx = pos.getX() + 0.5 - playerPos.x;
+                double dy = pos.getY() + 0.5 - playerPos.y;
+                double dz = pos.getZ() + 0.5 - playerPos.z;
+
+                if (dx * dx + dy * dy + dz * dz > maxDistance * maxDistance) continue;
             }
 
             if (show_esp.get()) {

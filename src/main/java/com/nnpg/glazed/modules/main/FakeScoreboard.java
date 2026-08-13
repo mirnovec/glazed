@@ -36,7 +36,7 @@ public class FakeScoreboard extends Module {
     private final Setting<String> title = sgGeneral.add(new StringSetting.Builder()
         .name("title")
         .description("Text at the top of the board.")
-        .defaultValue("Drdonutt")
+        .defaultValue("Glazed")
         .build()
     );
 
@@ -48,7 +48,7 @@ public class FakeScoreboard extends Module {
 
     private final Setting<String> money = sgLines.add(new StringSetting.Builder()
         .name("money-amount")
-        .defaultValue("67B")
+        .defaultValue("discord.gg")
         .visible(showMoney::get)
         .build()
     );
@@ -61,7 +61,7 @@ public class FakeScoreboard extends Module {
 
     private final Setting<String> shards = sgLines.add(new StringSetting.Builder()
         .name("shards-amount")
-        .defaultValue("67K")
+        .defaultValue("/glazed")
         .visible(showShards::get)
         .build()
     );
@@ -74,7 +74,7 @@ public class FakeScoreboard extends Module {
 
     private final Setting<String> kills = sgLines.add(new StringSetting.Builder()
         .name("kills-amount")
-        .defaultValue("67")
+        .defaultValue("nnpg")
         .visible(showKills::get)
         .build()
     );
@@ -87,7 +87,7 @@ public class FakeScoreboard extends Module {
 
     private final Setting<String> deaths = sgLines.add(new StringSetting.Builder()
         .name("deaths-amount")
-        .defaultValue("67")
+        .defaultValue("ar3")
         .visible(showDeaths::get)
         .build()
     );
@@ -100,7 +100,7 @@ public class FakeScoreboard extends Module {
 
     private final Setting<String> playtime = sgLines.add(new StringSetting.Builder()
         .name("playtime-amount")
-        .defaultValue("67h")
+        .defaultValue("67")
         .visible(showPlaytime::get)
         .build()
     );
