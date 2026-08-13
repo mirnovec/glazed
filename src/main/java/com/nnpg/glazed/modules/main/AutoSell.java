@@ -1,11 +1,11 @@
 package com.nnpg.glazed.modules.main;
 
 import com.nnpg.glazed.GlazedAddon;
+import com.nnpg.glazed.utils.GlazedSell;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
-import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ChestMenu;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.item.Item;
@@ -48,7 +48,7 @@ public class AutoSell extends Module {
     );
 
     private int delayCounter;
-    private boolean shouldReopen = false;
+    private boolean needsReopen;
 
     public AutoSell() {
         super(GlazedAddon.CATEGORY, "auto-sell", "Automatically sells items.");
@@ -57,12 +57,12 @@ public class AutoSell extends Module {
     @Override
     public void onActivate() {
         delayCounter = 20;
-        shouldReopen = false;
+        needsReopen = false;
     }
 
     @Override
     public void onDeactivate() {
-        shouldReopen = false;
+        needsReopen = false;
     }
 
     @EventHandler
@@ -74,75 +74,64 @@ public class AutoSell extends Module {
             return;
         }
 
-        if (shouldReopen) {
-            mc.getConnection().sendCommand("sell");
-            shouldReopen = false;
-            delayCounter = delay.get();
-            return;
-        }
-
-        handleSellMode();
-    }
-
-    private void handleSellMode() {
-        AbstractContainerMenu currentScreenHandler = mc.player.containerMenu;
-
-        if (!(currentScreenHandler instanceof ChestMenu)) {
-            mc.getConnection().sendCommand("sell");
+        if (needsReopen) {
+            GlazedSell.openSell();
+            needsReopen = false;
             delayCounter = 20;
             return;
         }
 
-        if (areAllSellSlotsOccupied(currentScreenHandler)) {
-            if (notifications.get()) info("All sell menu slots (0-35) are occupied. Closing and reopening menu.");
-            mc.player.closeContainer();
-            shouldReopen = true;
+        ChestMenu container = GlazedSell.container();
+
+        if (container == null) {
+            GlazedSell.openSell();
+            delayCounter = 20;
+            return;
+        }
+
+        int usable = GlazedSell.usableSlots(container);
+
+        // usable area full, close and reopen for the next batch
+        if (GlazedSell.firstEmptyUsableSlot(container) < 0) {
+            GlazedSell.close();
+            needsReopen = hasMatchingItems(container);
+            if (!needsReopen) {
+                if (notifications.get()) info("All items sold.");
+                toggle();
+            }
             delayCounter = delay.get();
             return;
         }
 
-        int totalSlots = currentScreenHandler.slots.size();
-        boolean foundItemToSell = false;
-
-        for (int slot = 36; slot < totalSlots; slot++) {
-            ItemStack stack = currentScreenHandler.getSlot(slot).getItem();
-
+        // find the next matching item in the player inventory and shift-click it in
+        int containerSlots = GlazedSell.containerSlots(container);
+        for (int slot = containerSlots; slot < container.slots.size(); slot++) {
+            ItemStack stack = container.getSlot(slot).getItem();
             if (stack.isEmpty()) continue;
+            if (!shouldSellItem(stack.getItem())) continue;
 
-            Item itemInSlot = stack.getItem();
-            if (!shouldSellItem(itemInSlot)) continue;
-
-            foundItemToSell = true;
-            mc.gameMode.handleContainerInput(currentScreenHandler.containerId, slot, 0, ContainerInput.QUICK_MOVE, mc.player);
+            mc.gameMode.handleContainerInput(container.containerId, slot, 0, ContainerInput.QUICK_MOVE, mc.player);
             delayCounter = delay.get();
             return;
         }
 
-        if (!foundItemToSell) {
-            if (notifications.get()) info("All items sold. Closing GUI.");
-            mc.player.closeContainer();
-            toggle();
-            delayCounter = 40;
-        }
+        // nothing left to deposit, close
+        GlazedSell.close();
+        if (notifications.get()) info("All items sold.");
+        toggle();
     }
 
-    private boolean areAllSellSlotsOccupied(AbstractContainerMenu screenHandler) {
-        for (int slot = 0; slot <= 35; slot++) {
-            if (slot >= screenHandler.slots.size()) {
-                return false;
-            }
-
-            ItemStack stack = screenHandler.getSlot(slot).getItem();
-            if (stack.isEmpty()) {
-                return false;
-            }
+    private boolean hasMatchingItems(ChestMenu container) {
+        int containerSlots = GlazedSell.containerSlots(container);
+        for (int slot = containerSlots; slot < container.slots.size(); slot++) {
+            ItemStack stack = container.getSlot(slot).getItem();
+            if (!stack.isEmpty() && shouldSellItem(stack.getItem())) return true;
         }
-        return true;
+        return false;
     }
 
     private boolean shouldSellItem(Item item) {
         List<Item> selectedItems = itemList.get();
-
         if (mode.get() == SellMode.Whitelist) {
             return selectedItems.contains(item);
         } else {
@@ -155,3 +144,4 @@ public class AutoSell extends Module {
         Blacklist
     }
 }
+

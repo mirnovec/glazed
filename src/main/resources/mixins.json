@@ -9,7 +9,8 @@
     "DefaultSettingsWidgetFactoryMixin",
     "ClientPlayNetworkHandlerMixin",
     "CameraMixin",
-    "EntityMixin"
+    "EntityMixin",
+    "TridentItemMixin"
   ],
   "injectors": {
     "defaultRequire": 1

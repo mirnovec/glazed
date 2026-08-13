@@ -2,9 +2,12 @@ package com.nnpg.glazed.modules.main;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import com.nnpg.glazed.GlazedAddon;
+import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.meteor.MouseScrollEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.ChunkOcclusionEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
+import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
@@ -12,6 +15,7 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
 import net.minecraft.client.CameraType;
+import net.minecraft.network.protocol.game.ClientboundRespawnPacket;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
@@ -24,10 +28,17 @@ public class GlazedFreecam extends Module {
     private final Setting<Double> speed = sgGeneral.add(new DoubleSetting.Builder()
         .name("speed")
         .description("Move freely.")
-        .defaultValue(5.0)
+        .defaultValue(0.8)
         .min(0.05)
         .max(20.0)
         .sliderRange(0.05, 20.0)
+        .build()
+    );
+
+    private final Setting<Boolean> staySneaking = sgGeneral.add(new BoolSetting.Builder()
+        .name("stay-sneaking")
+        .description("If you were already sneaking when you enabled freecam, keeps you sneaking so you stay on the ground and mine underwater faster.")
+        .defaultValue(true)
         .build()
     );
 
@@ -40,6 +51,8 @@ public class GlazedFreecam extends Module {
     public float previousPitch;
 
     private CameraType currentPerspective;
+    private double savedFovEffect;
+    private boolean savedBobView;
 
     private boolean isMovingForward;
     private boolean isMovingBackward;
@@ -47,6 +60,8 @@ public class GlazedFreecam extends Module {
     private boolean isMovingLeft;
     private boolean isMovingUp;
     private boolean isMovingDown;
+
+    private boolean sneakOnEnable;
 
     private long lastFrameTime;
 
@@ -61,6 +76,8 @@ public class GlazedFreecam extends Module {
             return;
         }
 
+        savedFovEffect = mc.options.fovEffectScale().get();
+        savedBobView = mc.options.bobView().get();
         mc.options.fovEffectScale().set(0.0);
         mc.options.bobView().set(false);
 
@@ -75,12 +92,12 @@ public class GlazedFreecam extends Module {
         // vro
         mc.player.setDeltaMovement(0.0, 0.0, 0.0);
 
-        mc.options.setCameraType(CameraType.THIRD_PERSON_BACK);
-
-        if (mc.options.getCameraType() == CameraType.THIRD_PERSON_FRONT) {
+        if (currentPerspective == CameraType.THIRD_PERSON_FRONT) {
             yaw += 180.0f;
             pitch *= -1.0f;
         }
+
+        mc.options.setCameraType(CameraType.FIRST_PERSON);
 
         previousYaw = yaw;
         previousPitch = pitch;
@@ -92,6 +109,8 @@ public class GlazedFreecam extends Module {
         isMovingUp = mc.options.keyJump.isDown();
         isMovingDown = mc.options.keyShift.isDown();
 
+        sneakOnEnable = mc.player.isShiftKeyDown();
+
         lastFrameTime = System.currentTimeMillis();
         resetMovementKeys();
 
@@ -100,7 +119,27 @@ public class GlazedFreecam extends Module {
 
     @Override
     public void onDeactivate() {
+        restoreView();
+    }
+
+    @EventHandler
+    private void onGameLeft(GameLeftEvent event) {
+        restoreView();
+        toggle();
+    }
+
+    @EventHandler
+    private void onRespawn(PacketEvent.Receive event) {
+        if (!(event.packet instanceof ClientboundRespawnPacket)) return;
+
+        restoreView();
+        toggle();
+    }
+
+    private void restoreView() {
         resetMovementKeys();
+
+        sneakOnEnable = false;
 
         previousPosition.set(currentPosition);
         previousYaw = yaw;
@@ -109,6 +148,10 @@ public class GlazedFreecam extends Module {
         if (mc.levelRenderer != null) mc.execute(mc.levelRenderer::allChanged);
 
         if (mc.options == null) return;
+
+        mc.options.fovEffectScale().set(savedFovEffect);
+        mc.options.bobView().set(savedBobView);
+
         mc.options.setCameraType(currentPerspective != null ? currentPerspective : CameraType.FIRST_PERSON);
     }
 
@@ -120,8 +163,12 @@ public class GlazedFreecam extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        if (mc.player == null) return;
+        if (mc.player == null || mc.options == null) return;
         resetMovementKeys();
+
+        if (staySneaking.get() && sneakOnEnable) mc.options.keyShift.setDown(true);
+
+        if (mc.options.getCameraType() != CameraType.FIRST_PERSON) mc.options.setCameraType(CameraType.FIRST_PERSON);
     }
 
     public void onGameRender() {

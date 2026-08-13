@@ -286,8 +286,6 @@ public class AnchorMacro extends Module {
             Direction side = hit.getDirection();
             ownedAnchors.add(mc.level.getBlockState(pos).canBeReplaced() ? pos : pos.relative(side));
         }
-
-        if (BlockUtil.isRespawnAnchorCharged(pos)) ownedAnchors.remove(pos);
     }
 
     // meh
