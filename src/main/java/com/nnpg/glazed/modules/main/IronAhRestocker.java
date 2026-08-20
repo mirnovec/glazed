@@ -167,6 +167,23 @@ public class IronAhRestocker extends Module {
         .build()
     );
 
+    private final Setting<ClearWhen> clearWhen = sgRemover.add(new EnumSetting.Builder<ClearWhen>()
+        .name("clear-when")
+        .description("When the clearing pass runs. OnlyWhenFull is the old behaviour: only after the server says you have listed too many.")
+        .defaultValue(ClearWhen.OnlyWhenFull)
+        .build()
+    );
+
+    private final Setting<Integer> clearEveryCycles = sgRemover.add(new IntSetting.Builder()
+        .name("clear-every-cycles")
+        .description("How many inventories to sell between clearing passes. Only used when clear-when is EveryNCycles.")
+        .defaultValue(3)
+        .min(1)
+        .max(50)
+        .sliderMax(20)
+        .build()
+    );
+
     private final Setting<Item> listingsButton = sgRemover.add(new ItemSetting.Builder()
         .name("your-listings-button")
         .description("The item in the ah menu that opens your own listings. Usually the chest.")
@@ -351,6 +368,7 @@ public class IronAhRestocker extends Module {
     private int menuIdBefore = -1;
     private int stalledRemovals = 0;
     private int goneRetries = 0;
+    private int cyclesSinceClear = 0;
     private ItemStack soldRef = ItemStack.EMPTY;
     private int countBeforeSale = 0;
     private BlockPos chestPos = null;
@@ -367,6 +385,8 @@ public class IronAhRestocker extends Module {
         lastAttemptPrice = 0;
         lastCycleFailed = false;
         handlingMessage = false;
+        pendingRemoval = false;
+        cyclesSinceClear = 0;
     }
 
     @Override
@@ -1129,6 +1149,7 @@ public class IronAhRestocker extends Module {
     private void tickRemoveClose() {
         closeAnyMenu();
         goneRetries = 0;
+        cyclesSinceClear = 0;
         delayCounter = jitter(screenDelay.get(), 1);
 
         if (removerTestOnly) {
@@ -1151,9 +1172,28 @@ public class IronAhRestocker extends Module {
     /** Normal end of a restock run. Straight back round after a short randomised gap. */
     private void endCycle(boolean failed) {
         lastCycleFailed = failed;
+        cyclesSinceClear++;
+
+        // scheduled clearing. the limit message sets this flag too, from startLimitCooldown
+        if (clearDue()) pendingRemoval = true;
+
         closeAnyMenu();
         delayCounter = jitter(cycleGap.get(), 5);
         state = State.COOLDOWN;
+    }
+
+    /**
+     * Whether a clearing pass is due now. OnlyWhenFull never schedules one here, it waits for the
+     * server to say the ah is full, which is what sets pendingRemoval from startLimitCooldown.
+     */
+    private boolean clearDue() {
+        if (!removeListings.get()) return false;
+
+        return switch (clearWhen.get()) {
+            case OnlyWhenFull -> false;
+            case EveryCycle -> true;
+            case EveryNCycles -> cyclesSinceClear >= clearEveryCycles.get();
+        };
     }
 
     /** Cycle that did no work. Longer, still randomised, so an empty chest does not spam commands. */
@@ -1259,6 +1299,12 @@ public class IronAhRestocker extends Module {
             String lower = msg.toLowerCase(Locale.ROOT);
             return lower.contains("already") || lower.contains("no longer") || lower.contains("not found");
         }
+    }
+
+    public enum ClearWhen {
+        OnlyWhenFull,
+        EveryCycle,
+        EveryNCycles
     }
 
     /** Matches the limit warning in whatever wording the server uses. */

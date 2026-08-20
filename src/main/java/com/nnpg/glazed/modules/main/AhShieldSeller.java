@@ -143,6 +143,30 @@ public class AhShieldSeller extends Module {
         .build()
     );
 
+    private final Setting<Boolean> collectListings = sgCollect.add(new BoolSetting.Builder()
+        .name("collect-listings")
+        .description("Take unsold shields back off the ah. Off means it never clears, it just waits out the timer and lists lower.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<ClearWhen> collectWhen = sgCollect.add(new EnumSetting.Builder<ClearWhen>()
+        .name("collect-when")
+        .description("When the collect run happens. OnlyWhenFull is the old behaviour: only once a shield bounces back or the server says the ah is full.")
+        .defaultValue(ClearWhen.OnlyWhenFull)
+        .build()
+    );
+
+    private final Setting<Integer> collectEveryCycles = sgCollect.add(new IntSetting.Builder()
+        .name("collect-every-cycles")
+        .description("How many inventories to sell between collect runs. Only used when collect-when is EveryNCycles.")
+        .defaultValue(3)
+        .min(1)
+        .max(50)
+        .sliderMax(20)
+        .build()
+    );
+
     private final Setting<Integer> collectWaitMinutes = sgCollect.add(new IntSetting.Builder()
         .name("collect-wait-minutes")
         .description("Minutes to wait after a listing bounces before going to collect the unsold shields back.")
@@ -331,6 +355,8 @@ public class AhShieldSeller extends Module {
     private int collected = 0;
     private int stalled = 0;
     private int goneRetries = 0;
+    private int cyclesSinceCollect = 0;
+    private boolean pendingCollect = false;
     private int menuIdBefore = -1;
     private boolean handlingMessage = false;
     private int countBeforeSale = 0;
@@ -348,6 +374,8 @@ public class AhShieldSeller extends Module {
         lastAttemptPrice = 0;
         lastCycleFailed = false;
         handlingMessage = false;
+        pendingCollect = false;
+        cyclesSinceCollect = 0;
     }
 
     @Override
@@ -416,6 +444,20 @@ public class AhShieldSeller extends Module {
     // ---------------------------------------------------------------- batch start
 
     private void tickIdle() {
+        // a scheduled clear is due. no wait here, nothing bounced, we are just tidying up
+        if (pendingCollect) {
+            pendingCollect = false;
+
+            if (collectListings.get()) {
+                collected = 0;
+                waited = 0;
+                stalled = 0;
+                goneRetries = 0;
+                state = State.COLLECT_SEND;
+                return;
+            }
+        }
+
         BlockPos target = lookedAtChest();
 
         if (requireChestLook.get() && target == null) {
@@ -861,8 +903,30 @@ public class AhShieldSeller extends Module {
         waited = 0;
         stalled = 0;
         goneRetries = 0;
+
+        // collecting switched off: still sit out the wait, then go again at a lower price
+        if (!collectListings.get()) {
+            delayCounter = jitter(collectWaitMinutes.get() * 60 * 20, 20 * 20);
+            state = State.COOLDOWN;
+            return;
+        }
+
         delayCounter = jitter(collectWaitMinutes.get() * 60 * 20, 20 * 20);
         state = State.COLLECT_WAIT;
+    }
+
+    /**
+     * Whether a collect run is due now. OnlyWhenFull never schedules one here, it waits for a
+     * shield to bounce back or for the server to say the ah is full.
+     */
+    private boolean collectDue() {
+        if (!collectListings.get()) return false;
+
+        return switch (collectWhen.get()) {
+            case OnlyWhenFull -> false;
+            case EveryCycle -> true;
+            case EveryNCycles -> cyclesSinceCollect >= collectEveryCycles.get();
+        };
     }
 
     private void tickCollectSend() {
@@ -1018,6 +1082,7 @@ public class AhShieldSeller extends Module {
         closeAnyMenu();
         stalled = 0;
         goneRetries = 0;
+        cyclesSinceCollect = 0;
 
         if (notifications.get()) info("Collected %d %s back, refilling.", collected, itemName());
 
@@ -1030,6 +1095,10 @@ public class AhShieldSeller extends Module {
 
     private void endBatch(boolean failed) {
         lastCycleFailed = failed;
+        cyclesSinceCollect++;
+
+        if (collectDue()) pendingCollect = true;
+
         closeAnyMenu();
         delayCounter = jitter(cycleGap.get(), 5);
         state = State.COOLDOWN;
@@ -1125,6 +1194,12 @@ public class AhShieldSeller extends Module {
         } finally {
             handlingMessage = false;
         }
+    }
+
+    public enum ClearWhen {
+        OnlyWhenFull,
+        EveryCycle,
+        EveryNCycles
     }
 
     /** Only the states that actually click shields out of the ah listen for a gone message. */
