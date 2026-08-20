@@ -71,6 +71,13 @@ public class SlabCrafter extends Module {
         .build()
     );
 
+    private final Setting<Boolean> dropSlabs = sgGeneral.add(new BoolSetting.Builder()
+        .name("drop-slabs")
+        .description("Throw the slabs on the floor once the crafting is done, the same as holding Q over them.")
+        .defaultValue(true)
+        .build()
+    );
+
     private final Setting<Boolean> notifications = sgGeneral.add(new BoolSetting.Builder()
         .name("notifications")
         .description("Show chat notifications.")
@@ -172,6 +179,26 @@ public class SlabCrafter extends Module {
         .build()
     );
 
+    private final Setting<Integer> dropDelayMin = sgTiming.add(new IntSetting.Builder()
+        .name("drop-delay-min")
+        .description("Fastest gap between dropped stacks. Each one picks a fresh number between min and max.")
+        .defaultValue(2)
+        .min(1)
+        .max(40)
+        .sliderMax(20)
+        .build()
+    );
+
+    private final Setting<Integer> dropDelayMax = sgTiming.add(new IntSetting.Builder()
+        .name("drop-delay-max")
+        .description("Slowest gap between dropped stacks. Keep it above the min or the rhythm is dead flat.")
+        .defaultValue(6)
+        .min(1)
+        .max(40)
+        .sliderMax(20)
+        .build()
+    );
+
     private final Setting<Integer> craftDelay = sgTiming.add(new IntSetting.Builder()
         .name("craft-delay")
         .description("Ticks between clicks at the crafting table. The result only appears once the server has checked the recipe, so this cannot be much lower.")
@@ -234,6 +261,7 @@ public class SlabCrafter extends Module {
         TABLE_OPEN, TABLE_WAIT,
         PLANKS_PLACE, PLANKS_WAIT, PLANKS_CRAFT,
         SLABS_FILL, SLABS_WAIT, SLABS_CRAFT,
+        DROP,
         TABLE_CLOSE,
         COOLDOWN
     }
@@ -267,6 +295,10 @@ public class SlabCrafter extends Module {
 
     private int madePlanks = 0;
     private int madeSlabs = 0;
+    private int dropped = 0;
+    private int dropSlot = -1;
+    private int dropCount = -1;
+    private int dropTries = 0;
 
     private BlockPos tablePos = null;
 
@@ -307,6 +339,10 @@ public class SlabCrafter extends Module {
         tidyCount = -1;
         tidyTries = 0;
         craftTicks = 0;
+        dropped = 0;
+        dropSlot = -1;
+        dropCount = -1;
+        dropTries = 0;
         tablePos = null;
         lastMenuId = Integer.MIN_VALUE;
         lastSignature = 0;
@@ -349,6 +385,7 @@ public class SlabCrafter extends Module {
             case SLABS_FILL -> tickSlabsFill();
             case SLABS_WAIT -> tickSlabsWait();
             case SLABS_CRAFT -> tickSlabsCraft();
+            case DROP -> tickDrop();
             case TABLE_CLOSE -> tickTableClose();
             case COOLDOWN -> {
                 resetCycle();
@@ -628,6 +665,10 @@ public class SlabCrafter extends Module {
         carryTries = 0;
         tidyTries = 0;
         craftTicks = 0;
+        dropped = 0;
+        dropSlot = -1;
+        dropCount = -1;
+        dropTries = 0;
         delayCounter = jitter(screenDelay.get(), 2);
         state = State.TABLE_WAIT;
     }
@@ -647,7 +688,7 @@ public class SlabCrafter extends Module {
 
     private boolean isCrafting() {
         return switch (state) {
-            case PLANKS_PLACE, PLANKS_WAIT, PLANKS_CRAFT, SLABS_FILL, SLABS_WAIT, SLABS_CRAFT, TABLE_CLOSE -> true;
+            case PLANKS_PLACE, PLANKS_WAIT, PLANKS_CRAFT, SLABS_FILL, SLABS_WAIT, SLABS_CRAFT, DROP, TABLE_CLOSE -> true;
             default -> false;
         };
     }
@@ -675,7 +716,7 @@ public class SlabCrafter extends Module {
         if (stalled >= 3) {
             if (notifications.get()) warning("Planks stopped coming out, moving on.");
             stalled = 0;
-            state = craftSlabs.get() ? State.SLABS_FILL : State.TABLE_CLOSE;
+            state = craftSlabs.get() ? State.SLABS_FILL : finishState();
             return;
         }
 
@@ -692,7 +733,7 @@ public class SlabCrafter extends Module {
 
         if (source < 0) {
             stalled = 0;
-            state = craftSlabs.get() ? State.SLABS_FILL : State.TABLE_CLOSE;
+            state = craftSlabs.get() ? State.SLABS_FILL : finishState();
             return;
         }
 
@@ -759,7 +800,7 @@ public class SlabCrafter extends Module {
 
         if (stalled >= 3) {
             if (notifications.get()) warning("Slabs stopped coming out, closing up.");
-            state = State.TABLE_CLOSE;
+            state = finishState();
             return;
         }
 
@@ -767,7 +808,7 @@ public class SlabCrafter extends Module {
             plankType = bestPlank(menu);
 
             if (plankType == null) {
-                state = State.TABLE_CLOSE;
+                state = finishState();
                 return;
             }
         }
@@ -837,6 +878,54 @@ public class SlabCrafter extends Module {
 
         delayCounter = jitter(craftDelay.get(), 2);
         state = State.SLABS_FILL;
+    }
+
+    /**
+     * Throws the finished slabs on the floor, a stack a click. In an open menu that is what Q on a
+     * slot does, so it goes out as one throw packet rather than a swap into the hotbar.
+     */
+    private void tickDrop() {
+        CraftingMenu menu = craftingMenu();
+
+        if (menu == null) {
+            endCraftEarly();
+            return;
+        }
+
+        if (dropCarried(menu)) return;
+
+        int slot = findItem(menu, INV_FIRST, MENU_SLOTS, this::isSlab);
+
+        if (slot < 0) {
+            if (notifications.get() && dropped > 0) info("Dropped %d stack(s) of slabs.", dropped);
+            state = State.TABLE_CLOSE;
+            return;
+        }
+
+        ItemStack stack = itemAt(menu, slot);
+
+        // same slot, same count, over and over means the server is refusing it
+        if (slot == dropSlot && stack.getCount() == dropCount) {
+            if (++dropTries >= 5) {
+                if (notifications.get()) warning("Slabs will not drop, closing the table.");
+                state = State.TABLE_CLOSE;
+                return;
+            }
+        } else {
+            dropSlot = slot;
+            dropCount = stack.getCount();
+            dropTries = 0;
+            dropped++;
+        }
+
+        // button 1 throws the whole stack, button 0 would be one item at a time
+        mc.gameMode.handleContainerInput(menu.containerId, slot, 1, ContainerInput.THROW, mc.player);
+
+        delayCounter = dropDelay();
+    }
+
+    private State finishState() {
+        return dropSlabs.get() ? State.DROP : State.TABLE_CLOSE;
     }
 
     private void tickTableClose() {
@@ -1162,7 +1251,11 @@ public class SlabCrafter extends Module {
     }
 
     private int countSlabs() {
-        return countInInventory(stack -> !stack.isEmpty() && stack.is(ItemTags.SLABS));
+        return countInInventory(this::isSlab);
+    }
+
+    private boolean isSlab(ItemStack stack) {
+        return !stack.isEmpty() && stack.is(ItemTags.SLABS);
     }
 
     private int countInInventory(java.util.function.Predicate<ItemStack> test) {
@@ -1191,9 +1284,17 @@ public class SlabCrafter extends Module {
     // ---------------------------------------------------------------- timing
 
     /** Fresh number per click, so emptying an order has no fixed rhythm. */
+    private int dropDelay() {
+        return randomBetween(dropDelayMin.get(), dropDelayMax.get());
+    }
+
     private int takeDelay() {
-        int min = Math.max(1, takeDelayMin.get());
-        int max = Math.max(min, takeDelayMax.get());
+        return randomBetween(takeDelayMin.get(), takeDelayMax.get());
+    }
+
+    private int randomBetween(int low, int high) {
+        int min = Math.max(1, low);
+        int max = Math.max(min, high);
 
         return min + random.nextInt(max - min + 1);
     }
