@@ -92,6 +92,7 @@ public class GlazedAddon extends MeteorAddon {
         Modules.get().add(new RTPNetherBaseFinder());
         Modules.get().add(new RTPer());
         Modules.get().add(new RainNoti());
+        Modules.get().add(new SlabCrafter());
         Modules.get().add(new SlabSeller());
         Modules.get().add(new ShulkerDropper());
         Modules.get().add(new SpawnerDropper());
