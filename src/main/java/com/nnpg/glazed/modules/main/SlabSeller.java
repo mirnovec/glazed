@@ -1,6 +1,7 @@
 package com.nnpg.glazed.modules.main;
 
 import com.nnpg.glazed.GlazedAddon;
+import com.nnpg.glazed.utils.GlazedSell;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -69,23 +70,9 @@ public class SlabSeller extends Module {
         .build()
     );
 
-    private final Setting<String> sellCommand = sgSell.add(new StringSetting.Builder()
-        .name("sell-command")
-        .description("Command that opens the sell chest. No leading slash.")
-        .defaultValue("sell")
-        .build()
-    );
-
-    private final Setting<Item> confirmButton = sgSell.add(new ItemSetting.Builder()
-        .name("confirm-button")
-        .description("The pane you click to sell. Switch this to lime stained glass if that is what your server uses.")
-        .defaultValue(Items.GREEN_STAINED_GLASS_PANE)
-        .build()
-    );
-
-    private final Setting<Boolean> confirmFromEnd = sgSell.add(new BoolSetting.Builder()
-        .name("confirm-bottom-right")
-        .description("Search for the confirm pane from the last slot backwards, so the bottom right one wins when the menu has several.")
+    private final Setting<Boolean> clickConfirm = sgSell.add(new BoolSetting.Builder()
+        .name("click-confirm")
+        .description("Click the confirm button in the bottom row before closing. Closing sells on its own, so this is belt and braces.")
         .defaultValue(true)
         .build()
     );
@@ -110,10 +97,30 @@ public class SlabSeller extends Module {
         .build()
     );
 
+    private final Setting<Integer> grabDelayMin = sgTiming.add(new IntSetting.Builder()
+        .name("grab-delay-min")
+        .description("Fastest gap between clicks while emptying the chest. Each click picks a fresh number between min and max.")
+        .defaultValue(1)
+        .min(1)
+        .max(40)
+        .sliderMax(20)
+        .build()
+    );
+
+    private final Setting<Integer> grabDelayMax = sgTiming.add(new IntSetting.Builder()
+        .name("grab-delay-max")
+        .description("Slowest gap between clicks while emptying the chest. Keep it above the min or the rhythm is dead flat.")
+        .defaultValue(4)
+        .min(1)
+        .max(40)
+        .sliderMax(20)
+        .build()
+    );
+
     private final Setting<Integer> clickDelay = sgTiming.add(new IntSetting.Builder()
         .name("click-delay")
-        .description("Ticks between each slot click while moving slabs around.")
-        .defaultValue(4)
+        .description("Ticks between each slot click while loading the sell chest.")
+        .defaultValue(3)
         .min(1)
         .max(40)
         .sliderMax(20)
@@ -140,16 +147,6 @@ public class SlabSeller extends Module {
         .build()
     );
 
-    private final Setting<Integer> verifyDelay = sgTiming.add(new IntSetting.Builder()
-        .name("verify-delay")
-        .description("Ticks after the confirm click before checking the chest actually emptied.")
-        .defaultValue(12)
-        .min(1)
-        .max(100)
-        .sliderMax(40)
-        .build()
-    );
-
     private final Setting<Integer> cycleGap = sgTiming.add(new IntSetting.Builder()
         .name("cycle-gap")
         .description("Ticks between one sale finishing and the next fill starting.")
@@ -173,7 +170,7 @@ public class SlabSeller extends Module {
     private enum State {
         IDLE,
         CHEST_OPEN, CHEST_WAIT, GRAB, CHEST_CLOSE,
-        SELL_SEND, SELL_WAIT, FILL, CONFIRM, VERIFY, SELL_CLOSE,
+        SELL_OPEN, SELL_WAIT, FILL, CONFIRM, SELL_CLOSE,
         COOLDOWN
     }
 
@@ -186,6 +183,7 @@ public class SlabSeller extends Module {
     private int filled = 0;
     private int sold = 0;
     private int stalled = 0;
+    private int lastLeftover = Integer.MAX_VALUE;
     private BlockPos chestPos = null;
 
     public SlabSeller() {
@@ -211,6 +209,7 @@ public class SlabSeller extends Module {
         filled = 0;
         waited = 0;
         stalled = 0;
+        lastLeftover = Integer.MAX_VALUE;
         chestPos = null;
     }
 
@@ -229,11 +228,10 @@ public class SlabSeller extends Module {
             case CHEST_WAIT -> tickChestWait();
             case GRAB -> tickGrab();
             case CHEST_CLOSE -> tickChestClose();
-            case SELL_SEND -> tickSellSend();
+            case SELL_OPEN -> tickSellOpen();
             case SELL_WAIT -> tickSellWait();
             case FILL -> tickFill();
             case CONFIRM -> tickConfirm();
-            case VERIFY -> tickVerify();
             case SELL_CLOSE -> tickSellClose();
             case COOLDOWN -> {
                 resetCycle();
@@ -334,7 +332,7 @@ public class SlabSeller extends Module {
             return;
         }
 
-        int source = findSlab(menu, 0, containerSlots(menu));
+        int source = findSlab(menu, 0, GlazedSell.containerSlots(menu));
 
         if (source < 0) {
             if (notifications.get() && grabbed == 0) info("No slabs in the chest.");
@@ -356,7 +354,7 @@ public class SlabSeller extends Module {
             grabbed++;
         }
 
-        delayCounter = jitter(clickDelay.get(), 1);
+        delayCounter = grabDelay();
     }
 
     private void tickChestClose() {
@@ -370,28 +368,29 @@ public class SlabSeller extends Module {
         }
 
         if (notifications.get()) info("Took %d stack(s) of slabs, selling.", grabbed);
-        state = State.SELL_SEND;
+        state = State.SELL_OPEN;
     }
 
     // ---------------------------------------------------------------- the sell menu
 
-    private void tickSellSend() {
-        mc.getConnection().sendCommand(sellCommand.get().trim());
+    /** Same entry point Auto Sell uses, so the command goes out exactly the way that one does. */
+    private void tickSellOpen() {
+        GlazedSell.openSell();
+        filled = 0;
         waited = 0;
+        stalled = 0;
         delayCounter = jitter(screenDelay.get(), 1);
         state = State.SELL_WAIT;
     }
 
     /**
-     * Waits for the sell chest. The confirm pane is what tells it apart from any other container,
-     * so a menu without one is never filled or clicked.
+     * Any chest that opens after the source chest was shut is the sell menu. An earlier version
+     * insisted on finding a green pane first and rejected the real menu, which is why this now
+     * leans on GlazedSell rather than guessing at the layout.
      */
     private void tickSellWait() {
-        ChestMenu menu = openChest();
-
-        if (menu != null && findConfirmSlot(menu) >= 0) {
+        if (GlazedSell.container() != null) {
             stalled = 0;
-            filled = 0;
             state = State.FILL;
             return;
         }
@@ -402,9 +401,9 @@ public class SlabSeller extends Module {
         }
     }
 
-    /** Shift-clicks slabs from the inventory into the sell chest, one click at a time. */
+    /** Shift-clicks slabs in, top rows only. The bottom row is the buttons. */
     private void tickFill() {
-        ChestMenu menu = openChest();
+        ChestMenu menu = GlazedSell.container();
 
         if (menu == null) {
             if (notifications.get()) warning("Sell menu closed early, backing off.");
@@ -412,11 +411,16 @@ public class SlabSeller extends Module {
             return;
         }
 
-        int total = containerSlots(menu);
-        int source = findSlab(menu, total, menu.slots.size());
+        // usable area full: sell this load, the rest goes in the next one
+        if (GlazedSell.firstEmptyUsableSlot(menu) < 0) {
+            delayCounter = jitter(confirmDelay.get(), 1);
+            state = State.CONFIRM;
+            return;
+        }
+
+        int source = findSlab(menu, GlazedSell.containerSlots(menu), menu.slots.size());
 
         if (source < 0) {
-            // nothing left to move
             if (filled == 0) {
                 if (notifications.get()) warning("Nothing went into the sell chest, backing off.");
                 endCycleBackoff();
@@ -428,17 +432,10 @@ public class SlabSeller extends Module {
             return;
         }
 
-        if (firstEmptyContainerSlot(menu) < 0) {
-            // chest is full, sell what is in it and come back for the rest
-            delayCounter = jitter(confirmDelay.get(), 1);
-            state = State.CONFIRM;
-            return;
-        }
-
-        ItemStack before = mc.player.getInventory().getItem(playerSlotIndex(menu, source)).copy();
+        ItemStack before = menu.getSlot(source).getItem().copy();
         mc.gameMode.handleContainerInput(menu.containerId, source, 0, ContainerInput.QUICK_MOVE, mc.player);
 
-        if (ItemStack.matches(before, mc.player.getInventory().getItem(playerSlotIndex(menu, source)))) {
+        if (ItemStack.matches(before, menu.getSlot(source).getItem())) {
             if (++stalled >= 4) {
                 if (notifications.get()) warning("Slabs are not going into the sell chest.");
 
@@ -459,75 +456,63 @@ public class SlabSeller extends Module {
         delayCounter = jitter(clickDelay.get(), 1);
     }
 
+    /** Clicks the confirm button if there is one. Closing sells anyway, so a miss is not fatal. */
     private void tickConfirm() {
-        ChestMenu menu = openChest();
+        ChestMenu menu = GlazedSell.container();
 
         if (menu == null) {
-            if (notifications.get()) warning("Sell menu closed before the confirm click.");
-            endCycleBackoff();
+            // server shut it for us, which on this server is itself the sale
+            finishLoad();
             return;
         }
 
-        int button = findConfirmSlot(menu);
+        if (clickConfirm.get()) {
+            int button = findButtonRowConfirm(menu);
 
-        if (button < 0) {
-            if (notifications.get()) warning("No %s in the sell menu, backing off.", buttonName());
-            endCycleBackoff();
-            return;
+            if (button >= 0) {
+                mc.gameMode.handleContainerInput(menu.containerId, button, 0, ContainerInput.PICKUP, mc.player);
+            } else if (notifications.get()) {
+                info("No confirm button found, closing to sell instead.");
+            }
         }
 
-        mc.gameMode.handleContainerInput(menu.containerId, button, 0, ContainerInput.PICKUP, mc.player);
-        waited = 0;
-        delayCounter = jitter(verifyDelay.get(), 1);
-        state = State.VERIFY;
+        delayCounter = jitter(confirmDelay.get(), 1);
+        state = State.SELL_CLOSE;
+    }
+
+    /** Closing is what actually banks the sale, the same thing pressing E does. */
+    private void tickSellClose() {
+        GlazedSell.close();
+        if (mc.screen != null) mc.setScreen(null);
+        finishLoad();
     }
 
     /**
-     * The click sells but leaves the menu open, so an emptied chest is the signal it worked. The
-     * inventory is no use here, the slabs left it during the fill.
+     * One chestful is done. If the inventory still holds slabs, open the menu again for the next
+     * load rather than walking back to the chest with items still in hand.
      */
-    private void tickVerify() {
-        ChestMenu menu = openChest();
+    private void finishLoad() {
+        int left = countInInventory();
+        sold += filled;
 
-        if (menu == null) {
-            // server closed it for us, treat that as done
-            sold += filled;
-            endCycle();
+        if (left > 0 && left < lastLeftover) {
+            lastLeftover = left;
+            if (notifications.get()) info("Sold %d stack(s), %d slot(s) still to go.", filled, left);
+            delayCounter = jitter(screenDelay.get(), 1);
+            state = State.SELL_OPEN;
             return;
         }
 
-        if (findSlab(menu, 0, containerSlots(menu)) < 0) {
-            sold += filled;
-            if (notifications.get()) info("Sold %d stack(s), %d this session.", filled, sold);
-            state = State.SELL_CLOSE;
-            return;
+        if (left > 0 && notifications.get()) {
+            warning("%d slot(s) of slabs would not sell, going back to the chest.", left);
+        } else if (notifications.get()) {
+            info("Sold %d stack(s), %d this session.", filled, sold);
         }
 
-        if (++waited >= menuTimeout.get()) {
-            if (notifications.get()) warning("Slabs are still sitting in the sell chest, leaving it alone.");
-            state = State.SELL_CLOSE;
-        }
-    }
-
-    private void tickSellClose() {
-        // same thing pressing E does, which the server also treats as a sell
-        closeAnyMenu();
         endCycle();
     }
 
     // ---------------------------------------------------------------- helpers
-
-    private int containerSlots(ChestMenu menu) {
-        return Math.min(menu.getRowCount() * 9, menu.slots.size());
-    }
-
-    /** Menu slot index converted back to an inventory index, for before/after comparisons. */
-    private int playerSlotIndex(ChestMenu menu, int menuSlot) {
-        int offset = menuSlot - containerSlots(menu);
-
-        // the menu lists the three storage rows first, then the hotbar
-        return offset < 27 ? offset + 9 : offset - 27;
-    }
 
     /** First slab in the menu slot range [from, to). */
     private int findSlab(ChestMenu menu, int from, int to) {
@@ -544,32 +529,22 @@ public class SlabSeller extends Module {
         return stack.getItem() instanceof BlockItem blockItem && blockItem.getBlock() instanceof SlabBlock;
     }
 
-    private int findConfirmSlot(ChestMenu menu) {
-        int total = containerSlots(menu);
+    /**
+     * Confirm button, searched from the bottom right of the button row backwards. Restricting it
+     * to that last row means a slab in the deposit area can never be mistaken for a button.
+     */
+    private int findButtonRowConfirm(ChestMenu menu) {
+        int total = Math.min(GlazedSell.containerSlots(menu), menu.slots.size());
 
-        if (confirmFromEnd.get()) {
-            for (int slot = total - 1; slot >= 0; slot--) {
-                if (menu.getSlot(slot).getItem().is(confirmButton.get())) return slot;
-            }
-            return -1;
-        }
-
-        for (int slot = 0; slot < total; slot++) {
-            if (menu.getSlot(slot).getItem().is(confirmButton.get())) return slot;
+        for (int slot = total - 1; slot >= GlazedSell.usableSlots(menu); slot--) {
+            if (GlazedSell.isConfirmButton(menu.getSlot(slot).getItem())) return slot;
         }
 
         return -1;
     }
 
     private int firstEmptyPlayerSlot(ChestMenu menu) {
-        for (int slot = containerSlots(menu); slot < menu.slots.size(); slot++) {
-            if (menu.getSlot(slot).getItem().isEmpty()) return slot;
-        }
-        return -1;
-    }
-
-    private int firstEmptyContainerSlot(ChestMenu menu) {
-        for (int slot = 0; slot < containerSlots(menu); slot++) {
+        for (int slot = GlazedSell.containerSlots(menu); slot < menu.slots.size(); slot++) {
             if (menu.getSlot(slot).getItem().isEmpty()) return slot;
         }
         return -1;
@@ -586,8 +561,12 @@ public class SlabSeller extends Module {
         return total;
     }
 
-    private String buttonName() {
-        return confirmButton.get().getDefaultInstance().getHoverName().getString();
+    /** Fresh number per click, so emptying a chest has no fixed rhythm. */
+    private int grabDelay() {
+        int min = Math.max(1, grabDelayMin.get());
+        int max = Math.max(min, grabDelayMax.get());
+
+        return min + random.nextInt(max - min + 1);
     }
 
     private void endCycle() {
