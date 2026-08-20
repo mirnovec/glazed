@@ -16,10 +16,13 @@ import net.minecraft.world.inventory.CraftingMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CraftingTableBlock;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.Random;
 
@@ -68,6 +71,23 @@ public class SlabCrafter extends Module {
         .name("craft-slabs")
         .description("Carry on from planks to slabs. Off stops at planks.")
         .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> requireTableLook = sgGeneral.add(new BoolSetting.Builder()
+        .name("require-table-look")
+        .description("Only start a cycle while your crosshair is on a crafting table, which is how you pause it. Off takes the nearest table instead.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Integer> tableRange = sgGeneral.add(new IntSetting.Builder()
+        .name("table-range")
+        .description("How far to look for a crafting table when the crosshair is not on one.")
+        .defaultValue(4)
+        .min(1)
+        .max(6)
+        .sliderMax(6)
         .build()
     );
 
@@ -292,6 +312,7 @@ public class SlabCrafter extends Module {
     private int tidyCount = -1;
     private int tidyTries = 0;
     private int craftTicks = 0;
+    private int idleNags = 0;
 
     private int madePlanks = 0;
     private int madeSlabs = 0;
@@ -313,6 +334,7 @@ public class SlabCrafter extends Module {
         delayCounter = 0;
         madePlanks = 0;
         madeSlabs = 0;
+        idleNags = 0;
     }
 
     @Override
@@ -397,11 +419,17 @@ public class SlabCrafter extends Module {
     // ---------------------------------------------------------------- cycle start
 
     private void tickIdle() {
-        if (lookedAtTable() == null) {
-            // waiting, silently. looking away from the table is how you pause this thing
+        BlockPos target = resolveTable(true);
+
+        if (target == null) {
+            // say so. a module that waits without a word is indistinguishable from a broken one
+            announceWaiting();
             delayCounter = jitter(12, 4);
             return;
         }
+
+        tablePos = target;
+        idleNags = 0;
 
         int free = freeSlots();
 
@@ -427,8 +455,66 @@ public class SlabCrafter extends Module {
         if (!(mc.hitResult instanceof BlockHitResult hit)) return null;
         if (hit.getType() != HitResult.Type.BLOCK) return null;
 
-        Block block = mc.level.getBlockState(hit.getBlockPos()).getBlock();
-        return block instanceof CraftingTableBlock ? hit.getBlockPos() : null;
+        return isTable(hit.getBlockPos()) ? hit.getBlockPos() : null;
+    }
+
+    /** Identity first: the block a server hands you is the real one whatever class it maps to. */
+    private boolean isTable(BlockPos pos) {
+        Block block = mc.level.getBlockState(pos).getBlock();
+        return block == Blocks.CRAFTING_TABLE || block instanceof CraftingTableBlock;
+    }
+
+    /**
+     * The table to work at. The crosshair wins, and starting a cycle needs it. Once a cycle is
+     * under way the table has not moved, so a wobble mid run does not throw away the trip.
+     */
+    private BlockPos resolveTable(boolean starting) {
+        BlockPos looked = lookedAtTable();
+        if (looked != null) return looked;
+
+        if (!starting && tablePos != null && isTable(tablePos)) return tablePos;
+        if (starting && requireTableLook.get()) return null;
+
+        return nearbyTable();
+    }
+
+    private BlockPos nearbyTable() {
+        BlockPos origin = mc.player.blockPosition();
+        BlockPos best = null;
+        double bestDistance = Double.MAX_VALUE;
+        int range = tableRange.get();
+
+        for (int x = -range; x <= range; x++) {
+            for (int y = -range; y <= range; y++) {
+                for (int z = -range; z <= range; z++) {
+                    BlockPos pos = origin.offset(x, y, z);
+                    if (!isTable(pos)) continue;
+
+                    double distance = pos.distSqr(origin);
+
+                    if (distance < bestDistance) {
+                        bestDistance = distance;
+                        best = pos;
+                    }
+                }
+            }
+        }
+
+        return best;
+    }
+
+    /** Every few seconds, and named: knowing what the crosshair is on is the whole answer. */
+    private void announceWaiting() {
+        if (!notifications.get()) return;
+        if (idleNags++ % 8 != 0) return;
+
+        if (mc.hitResult instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK) {
+            info("Waiting: your crosshair is on %s, not a crafting table.",
+                mc.level.getBlockState(hit.getBlockPos()).getBlock().getName().getString());
+            return;
+        }
+
+        info("Waiting: point your crosshair at a crafting table.");
     }
 
     // ---------------------------------------------------------------- the orders menus
@@ -644,13 +730,20 @@ public class SlabCrafter extends Module {
     // ---------------------------------------------------------------- the crafting table
 
     private void tickTableOpen() {
-        tablePos = lookedAtTable();
+        tablePos = resolveTable(false);
 
-        if (tablePos == null || !(mc.hitResult instanceof BlockHitResult hit)) {
-            if (notifications.get()) warning("Not looking at a crafting table any more, backing off.");
+        if (tablePos == null) {
+            if (notifications.get()) warning("No crafting table to work at any more, backing off.");
             endCycleBackoff();
             return;
         }
+
+        // the real hit when the crosshair is still on it, otherwise aim at the middle of the block
+        BlockHitResult hit = mc.hitResult instanceof BlockHitResult looked
+            && looked.getType() == HitResult.Type.BLOCK
+            && looked.getBlockPos().equals(tablePos)
+                ? looked
+                : new BlockHitResult(Vec3.atCenterOf(tablePos), Direction.UP, tablePos, false);
 
         // the same call a right click makes, swing included
         mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, hit);
