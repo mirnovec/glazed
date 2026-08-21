@@ -1,5 +1,6 @@
 package com.nnpg.glazed;
 
+import com.nnpg.glazed.commands.DeathPosCommand;
 import com.nnpg.glazed.commands.RemoverTestCommand;
 import com.nnpg.glazed.modules.esp.*;
 import com.nnpg.glazed.modules.main.*;
@@ -30,6 +31,7 @@ public class GlazedAddon extends MeteorAddon {
     @Override
     public void onInitialize() {
         // commands
+        Commands.add(new DeathPosCommand());
         Commands.add(new RemoverTestCommand());
 
         // esp
