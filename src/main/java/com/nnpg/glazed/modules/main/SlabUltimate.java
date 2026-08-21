@@ -9,6 +9,7 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.inventory.ChestMenu;
@@ -48,6 +49,14 @@ public class SlabUltimate extends Module {
     private static final int ROW_LAST = 3;   // the slab recipe wants three planks in the top row
     private static final int INV_FIRST = 10;
     private static final int MENU_SLOTS = 46;
+    /** A slot of logs comes back as eight slots of slabs, so that is the headroom one wave needs. */
+    private static final int WAVE_SLOTS = 8;
+    /** The slab recipe wants three planks in a row, so three whole stacks is one clean row. */
+    private static final int ROW_STACKS = 3;
+    /** One full row craft comes back as six stacks, so that is the room it needs first. */
+    private static final int ROW_OUTPUT_SLOTS = 6;
+    /** Backstop on the sell-and-return loop. Far above any real batch, low enough to end. */
+    private static final int MAX_WAVES = 40;
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgOrders = settings.createGroup("Orders menu");
@@ -63,17 +72,31 @@ public class SlabUltimate extends Module {
 
     private final Setting<Integer> logStacks = sgGeneral.add(new IntSetting.Builder()
         .name("log-stacks")
-        .description("Stacks of logs to pull per trip. One stack turns into about eight stacks of slabs, so this is capped by the free space you actually have.")
-        .defaultValue(4)
+        .description("Stacks of logs to pull per trip. With finish-batch on, these only have to fit in your inventory as logs, not as the slabs they become, so this can be far more than one load's worth.")
+        .defaultValue(8)
         .min(1)
-        .max(16)
-        .sliderMax(8)
+        .max(27)
+        .sliderMax(20)
         .build()
     );
 
     private final Setting<Boolean> craftSlabs = sgGeneral.add(new BoolSetting.Builder()
         .name("craft-slabs")
         .description("Carry on from planks to slabs. Off stops at planks.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> finishBatch = sgGeneral.add(new BoolSetting.Builder()
+        .name("finish-batch")
+        .description("When the inventory fills up, sell what is made and come straight back to the table for the rest. Off sells once and goes back for logs, which is what leaves a hotbar of planks behind.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> fullStacksOnly = sgGeneral.add(new BoolSetting.Builder()
+        .name("full-stacks-only")
+        .description("Only feed the row from whole stacks of planks, so every craft is 64 of each and nothing comes back as an odd remainder. Off splits the last stack to squeeze out the tail.")
         .defaultValue(true)
         .build()
     );
@@ -312,11 +335,14 @@ public class SlabUltimate extends Module {
     private final java.util.Set<Item> skippedPlanks = new java.util.HashSet<>();
     private int carrySource = -1;
     private int carryTries = 0;
-    private int tidySlot = -1;
-    private int tidyCount = -1;
+    private long tidyShape = Long.MIN_VALUE;
     private int tidyTries = 0;
+    private int bounceMark = -1;
+    private int bounces = 0;
+    private int strandedMark = -1;
     private int craftTicks = 0;
     private int idleNags = 0;
+    private int waves = 0;
 
     private int madePlanks = 0;
     private int madeSlabs = 0;
@@ -339,6 +365,7 @@ public class SlabUltimate extends Module {
         madeSlabs = 0;
         sold = 0;
         idleNags = 0;
+        strandedMark = -1;
     }
 
     @Override
@@ -361,10 +388,12 @@ public class SlabUltimate extends Module {
         skippedPlanks.clear();
         carrySource = -1;
         carryTries = 0;
-        tidySlot = -1;
-        tidyCount = -1;
+        tidyShape = Long.MIN_VALUE;
         tidyTries = 0;
+        bounceMark = -1;
+        bounces = 0;
         craftTicks = 0;
+        waves = 0;
         filled = 0;
         lastLeftover = Integer.MAX_VALUE;
         tablePos = null;
@@ -425,6 +454,31 @@ public class SlabUltimate extends Module {
     // ---------------------------------------------------------------- cycle start
 
     private void tickIdle() {
+        // slabs still on you from a batch that died mid-flight. selling them is the only way a full
+        // inventory ever comes back, and it has to happen before the table check or looking away
+        // once would leave the module wedged for good
+        int stranded = slabSlots();
+
+        if (stranded > 0) {
+            if (stranded == strandedMark) {
+                if (notifications.get()) warning("%d slot(s) of slabs will not sell. Clear them and I will carry on.", stranded);
+                delayCounter = jitter(idleBackoff.get(), 40);
+                return;
+            }
+
+            strandedMark = stranded;
+            lastLeftover = Integer.MAX_VALUE;
+            filled = 0;
+
+            if (notifications.get()) info("Slabs left over from the last batch, selling those first.");
+
+            delayCounter = jitter(screenDelay.get(), 2);
+            state = State.SELL_OPEN;
+            return;
+        }
+
+        strandedMark = -1;
+
         BlockPos target = resolveTable(true);
 
         if (target == null) {
@@ -439,14 +493,17 @@ public class SlabUltimate extends Module {
 
         int free = freeSlots();
 
-        if (free < 6) {
+        if (free < WAVE_SLOTS + 2) {
             if (notifications.get()) warning("Not enough room to craft, waiting for space.");
             endCycleBackoff();
             return;
         }
 
-        // one stack of logs becomes roughly eight of slabs, so nine free slots buys one stack
-        targetStacks = Math.max(1, Math.min(logStacks.get(), free / 9));
+        // a stack of logs becomes eight of slabs. selling between waves means only one wave has to
+        // fit at a time, so with finish-batch on the logs themselves are all the inventory holds
+        targetStacks = finishBatch.get()
+            ? Math.max(1, Math.min(logStacks.get(), free - WAVE_SLOTS))
+            : Math.max(1, Math.min(logStacks.get(), free / 9));
 
         if (!fetchLogs.get() || countLogs() >= targetStacks * 64) {
             state = State.TABLE_OPEN;
@@ -763,6 +820,9 @@ public class SlabUltimate extends Module {
         skippedPlanks.clear();
         carryTries = 0;
         tidyTries = 0;
+        tidyShape = Long.MIN_VALUE;
+        bounceMark = -1;
+        bounces = 0;
         craftTicks = 0;
         filled = 0;
         lastLeftover = Integer.MAX_VALUE;
@@ -809,7 +869,15 @@ public class SlabUltimate extends Module {
         }
 
         if (dropCarried(menu)) return;
-        checkCraftProgress(false);
+        checkCraftProgress(menu, false);
+
+        if (bouncing(menu, this::isLog)) {
+            if (notifications.get()) warning("Logs keep going in and out of the grid without crafting, moving on.");
+            bounces = 0;
+            stalled = 0;
+            state = craftSlabs.get() ? State.SLABS_FILL : State.TABLE_CLOSE;
+            return;
+        }
 
         if (stalled >= 3) {
             if (notifications.get()) warning("Planks stopped coming out, moving on.");
@@ -818,12 +886,35 @@ public class SlabUltimate extends Module {
             return;
         }
 
-        // grid has to hold nothing but the logs in the first slot
-        if (tidyGrid(menu, GRID_FIRST, this::isLog)) return;
+        // the plank recipe is shapeless and takes a single ingredient, so it wants exactly one
+        // occupied grid slot and does not care which one. pinning it to the first slot is what made
+        // a stack the server dropped anywhere else bounce straight back out, over and over
+        int gridLog = findItem(menu, GRID_FIRST, GRID_LAST + 1, this::isLog);
 
-        if (!itemAt(menu, GRID_FIRST).isEmpty()) {
+        if (tidyGrid(menu, 0, stack -> false, gridLog)) return;
+
+        if (gridLog >= 0) {
             waited = 0;
             state = State.PLANKS_WAIT;
+            return;
+        }
+
+        // every whole stack of planks on you needs one more free slot to finish becoming slabs,
+        // and converting one more log stack adds four of them. running past that is what buried a
+        // whole run in planks it had no room left to craft, so only carry on while the pile fits
+        int freeNow = freeSlots();
+        int pile = wholePlankStacks();
+
+        if (craftSlabs.get() && pile >= ROW_STACKS && freeNow < pile + 7) {
+            stalled = 0;
+            state = State.SLABS_FILL;
+            return;
+        }
+
+        // and never take on another four stacks of planks without somewhere to put them
+        if (freeNow < 5) {
+            stalled = 0;
+            state = craftSlabs.get() ? State.SLABS_FILL : State.TABLE_CLOSE;
             return;
         }
 
@@ -871,8 +962,8 @@ public class SlabUltimate extends Module {
             return;
         }
 
-        craftSnapshot = countLogs();
-        outputSnapshot = countPlanks();
+        craftSnapshot = menuCount(menu, this::isLog);
+        outputSnapshot = menuCount(menu, this::isPlank);
 
         // on the result slot the server repeats the craft until the logs run out or you fill up
         mc.gameMode.handleContainerInput(menu.containerId, RESULT_SLOT, 0, ContainerInput.QUICK_MOVE, mc.player);
@@ -894,7 +985,14 @@ public class SlabUltimate extends Module {
         }
 
         if (dropCarried(menu)) return;
-        checkCraftProgress(true);
+        checkCraftProgress(menu, true);
+
+        if (bouncing(menu, this::isPlank)) {
+            if (notifications.get()) warning("Planks keep going in and out of the grid without crafting, closing up.");
+            bounces = 0;
+            state = State.TABLE_CLOSE;
+            return;
+        }
 
         if (stalled >= 3) {
             if (notifications.get()) warning("Slabs stopped coming out, closing up.");
@@ -920,7 +1018,27 @@ public class SlabUltimate extends Module {
             return;
         }
 
-        int source = findItem(menu, INV_FIRST, MENU_SLOTS, stack -> stack.is(plankType));
+        // a full row comes back as six stacks. starting one without room for all of it strands the
+        // ingredients in a grid that then cannot be emptied, which is items on the floor
+        if (freeSlots() < ROW_OUTPUT_SLOTS) {
+            if (notifications.get()) info("No room for another craft, selling what is made.");
+            state = State.TABLE_CLOSE;
+            return;
+        }
+
+        // a row is three whole stacks, counting what is already in it. starting one this type
+        // cannot finish just shifts stacks in and straight back out again, which is the couple of
+        // seconds of shuffling at the tail of every run
+        if (fullStacksOnly.get() && rowLoaded(menu) + wholeStacksOf(menu, plankType) < ROW_STACKS) {
+            if (tidyGrid(menu, 0, stack -> false)) return;
+
+            plankType = null;
+            return;
+        }
+
+        int source = fullStacksOnly.get()
+            ? findItem(menu, INV_FIRST, MENU_SLOTS, stack -> stack.is(plankType) && isWholeStack(stack))
+            : findItem(menu, INV_FIRST, MENU_SLOTS, stack -> stack.is(plankType));
 
         if (source >= 0) {
             mc.gameMode.handleContainerInput(menu.containerId, source, 0, ContainerInput.QUICK_MOVE, mc.player);
@@ -928,8 +1046,9 @@ public class SlabUltimate extends Module {
             return;
         }
 
-        // nothing left to shift in, so halve what is already there into the empty slot
-        if (splitIntoRow(menu)) {
+        // nothing whole left to shift in. splitting would put an odd count in the row and hand the
+        // change back as a part stack, so on full-stacks-only this type is simply finished
+        if (!fullStacksOnly.get() && splitIntoRow(menu)) {
             delayCounter = jitter(craftDelay.get(), 2);
             return;
         }
@@ -969,8 +1088,8 @@ public class SlabUltimate extends Module {
             return;
         }
 
-        craftSnapshot = countPlanks();
-        outputSnapshot = countSlabs();
+        craftSnapshot = menuCount(menu, this::isPlank);
+        outputSnapshot = menuCount(menu, this::isSlab);
 
         mc.gameMode.handleContainerInput(menu.containerId, RESULT_SLOT, 0, ContainerInput.QUICK_MOVE, mc.player);
 
@@ -1134,9 +1253,31 @@ public class SlabUltimate extends Module {
         }
 
         if (left > 0 && notifications.get()) {
-            warning("%d slot(s) of slabs would not sell, going back for logs.", left);
+            warning("%d slot(s) of slabs would not sell, moving on.", left);
         } else if (notifications.get()) {
             info("Sold %d stack(s), %d this session.", filled, sold);
+        }
+
+        // logs or whole stacks of planks still on you means the batch is not done, and going back
+        // for more logs now is exactly what strands them. reopen the table and finish the job
+        if (finishBatch.get() && moreToCraft()) {
+            if (++waves > MAX_WAVES) {
+                if (notifications.get()) warning("Hit the %d wave limit with %d log(s) and %d plank(s) left, ending the batch.", MAX_WAVES, countLogs(), countPlanks());
+                endCycle();
+                return;
+            }
+
+            if (freeSlots() < WAVE_SLOTS) {
+                if (notifications.get()) warning("%d log(s) and %d plank(s) still to craft but only %d free slot(s), ending the batch.", countLogs(), countPlanks(), freeSlots());
+                endCycle();
+                return;
+            }
+
+            if (notifications.get()) info("Wave %d sold. %d log(s) and %d plank(s) left, back to the table.", waves, countLogs(), countPlanks());
+
+            delayCounter = jitter(screenDelay.get(), 2);
+            state = State.TABLE_OPEN;
+            return;
         }
 
         endCycle();
@@ -1182,22 +1323,30 @@ public class SlabUltimate extends Module {
      * @param keepUntil grid slots below this are allowed to keep matching stacks
      */
     private boolean tidyGrid(CraftingMenu menu, int keepUntil, java.util.function.Predicate<ItemStack> keep) {
+        return tidyGrid(menu, keepUntil, keep, -1);
+    }
+
+    /** @param keepSlot one grid slot to leave alone whatever is in it, or -1 for none */
+    private boolean tidyGrid(CraftingMenu menu, int keepUntil, java.util.function.Predicate<ItemStack> keep, int keepSlot) {
         for (int slot = GRID_FIRST; slot <= GRID_LAST; slot++) {
             ItemStack stack = itemAt(menu, slot);
 
             if (stack.isEmpty()) continue;
+            if (slot == keepSlot) continue;
             if (slot <= keepUntil && keep.test(stack)) continue;
 
-            // same slot, same count, over and over means the server is refusing it
-            if (slot == tidySlot && stack.getCount() == tidyCount) {
-                if (++tidyTries >= 5) {
+            // the whole grid unchanged, over and over, means the server is refusing it. keying
+            // this on a single slot let two stuck slots alternate and reset the counter forever
+            long shape = gridShape(menu);
+
+            if (shape == tidyShape) {
+                if (++tidyTries >= 6) {
                     if (notifications.get()) warning("The grid will not empty, closing the table.");
                     endCycleBackoff();
                     return true;
                 }
             } else {
-                tidySlot = slot;
-                tidyCount = stack.getCount();
+                tidyShape = shape;
                 tidyTries = 0;
             }
 
@@ -1206,11 +1355,73 @@ public class SlabUltimate extends Module {
             return true;
         }
 
-        tidySlot = -1;
-        tidyCount = -1;
+        tidyShape = Long.MIN_VALUE;
         tidyTries = 0;
 
         return false;
+    }
+
+    /** Stock across the grid and the inventory. The result slot is only a preview, so it is skipped. */
+    private int menuCount(net.minecraft.world.inventory.AbstractContainerMenu menu, java.util.function.Predicate<ItemStack> test) {
+        int total = 0;
+
+        for (int slot = GRID_FIRST; slot < MENU_SLOTS && slot < menu.slots.size(); slot++) {
+            ItemStack stack = itemAt(menu, slot);
+            if (!stack.isEmpty() && test.test(stack)) total += stack.getCount();
+        }
+
+        return total;
+    }
+
+    /** Everything the grid holds as one number, so a change anywhere in it is visible. */
+    private long gridShape(CraftingMenu menu) {
+        long hash = 1;
+
+        for (int slot = GRID_FIRST; slot <= GRID_LAST; slot++) {
+            ItemStack stack = itemAt(menu, slot);
+            hash = hash * 31 + (stack.isEmpty() ? 0 : stack.getItem().hashCode() * 31L + stack.getCount());
+        }
+
+        return hash;
+    }
+
+    /**
+     * Last resort against a shuffle that never crafts. Counting the grid and the inventory together
+     * means moving a stack between them is not progress, which is the whole shape of that loop.
+     */
+    private boolean bouncing(CraftingMenu menu, java.util.function.Predicate<ItemStack> input) {
+        int now = menuCount(menu, input);
+
+        if (now != bounceMark) {
+            bounceMark = now;
+            bounces = 0;
+            return false;
+        }
+
+        return ++bounces > 24;
+    }
+
+    /** Row slots already holding something, so a part built row still counts toward the three. */
+    private int rowLoaded(CraftingMenu menu) {
+        int total = 0;
+
+        for (int slot = GRID_FIRST; slot <= ROW_LAST; slot++) {
+            if (!itemAt(menu, slot).isEmpty()) total++;
+        }
+
+        return total;
+    }
+
+    /** Whole stacks of one item in the inventory half of the menu. */
+    private int wholeStacksOf(net.minecraft.world.inventory.AbstractContainerMenu menu, Item type) {
+        int total = 0;
+
+        for (int slot = INV_FIRST; slot < MENU_SLOTS && slot < menu.slots.size(); slot++) {
+            ItemStack stack = itemAt(menu, slot);
+            if (stack.is(type) && isWholeStack(stack)) total++;
+        }
+
+        return total;
     }
 
     /** All three row slots loaded, which is what the slab recipe wants. */
@@ -1285,11 +1496,14 @@ public class SlabUltimate extends Module {
      * Did the last shift click on the result actually consume anything? A full inventory is the
      * usual reason it did not, and without this check the module would happily click forever.
      */
-    private void checkCraftProgress(boolean slabsPhase) {
+    private void checkCraftProgress(CraftingMenu menu, boolean slabsPhase) {
         if (craftSnapshot < 0) return;
 
-        int inputNow = slabsPhase ? countPlanks() : countLogs();
-        int outputNow = slabsPhase ? countSlabs() : countPlanks();
+        // count the grid as well as the inventory. the stock sits in the grid at the moment the
+        // snapshot is taken, so an inventory-only count can never watch it be consumed and every
+        // craft reads as a stall, which is what cut each run off after three rounds
+        int inputNow = slabsPhase ? menuCount(menu, this::isPlank) : menuCount(menu, this::isLog);
+        int outputNow = slabsPhase ? menuCount(menu, this::isSlab) : menuCount(menu, this::isPlank);
 
         // one shift click on the result is many crafts, so count what arrived, not the stack size
         if (outputNow > outputSnapshot) {
@@ -1308,6 +1522,43 @@ public class SlabUltimate extends Module {
         outputSnapshot = -1;
     }
 
+    /**
+     * A stack holding as much as it can. Reads the item's own limit rather than assuming 64, so a
+     * server that shrinks a stack with a component does not quietly break the row.
+     */
+    private boolean isWholeStack(ItemStack stack) {
+        if (stack.isEmpty()) return false;
+
+        int max = stack.getOrDefault(DataComponents.MAX_STACK_SIZE, stack.getItem().getDefaultMaxStackSize());
+        return stack.getCount() >= max;
+    }
+
+    /** Whole stacks of the single best plank type on you. Part stacks are remainders, not stock. */
+    private int wholePlankStacks() {
+        java.util.Map<Item, Integer> counts = new java.util.HashMap<>();
+        int size = mc.player.getInventory().getContainerSize();
+        int best = 0;
+
+        for (int slot = 0; slot < 36 && slot < size; slot++) {
+            ItemStack stack = mc.player.getInventory().getItem(slot);
+
+            if (!isPlank(stack)) continue;
+            if (fullStacksOnly.get() && !isWholeStack(stack)) continue;
+
+            best = Math.max(best, counts.merge(stack.getItem(), 1, Integer::sum));
+        }
+
+        return best;
+    }
+
+    /** Anything left that is worth reopening the table for. */
+    private boolean moreToCraft() {
+        // 48 logs is 192 planks, which is exactly one row, so anything less cannot make a craft
+        if (countLogs() >= (fullStacksOnly.get() ? 48 : 1)) return true;
+
+        return craftSlabs.get() && wholePlankStacks() >= ROW_STACKS;
+    }
+
     /** The plank type with the most in the inventory, as long as there are three of them. */
     private Item bestPlank(CraftingMenu menu) {
         Item best = null;
@@ -1322,12 +1573,20 @@ public class SlabUltimate extends Module {
             if (best != null && candidate == best) continue;
 
             int total = 0;
+            int whole = 0;
+
             for (int other = INV_FIRST; other < MENU_SLOTS; other++) {
                 ItemStack found = itemAt(menu, other);
-                if (found.is(candidate)) total += found.getCount();
+                if (!found.is(candidate)) continue;
+
+                total += found.getCount();
+                if (isWholeStack(found)) whole++;
             }
 
-            if (total >= 3 && total > bestCount) {
+            // a clean row is three whole stacks. anything short of that is a remainder, not stock
+            boolean usable = fullStacksOnly.get() ? whole >= ROW_STACKS : total >= 3;
+
+            if (usable && total > bestCount) {
                 bestCount = total;
                 best = candidate;
             }
@@ -1547,6 +1806,7 @@ public class SlabUltimate extends Module {
 
     @Override
     public String getInfoString() {
-        return state.toString().toLowerCase().replace("_", " ");
+        String label = state.toString().toLowerCase().replace("_", " ");
+        return waves > 0 ? label + " (wave " + waves + ")" : label;
     }
 }
