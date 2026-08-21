@@ -66,6 +66,7 @@ public class GlazedAddon extends MeteorAddon {
         Modules.get().add(new AhShieldSeller());
         Modules.get().add(new AdminHud());
         Modules.get().add(new AdminList());
+        Modules.get().add(new AutoLeave());
         Modules.get().add(new AutoPearlChain());
         Modules.get().add(new AutoSell());
         Modules.get().add(new AutoSpawnerSell());
