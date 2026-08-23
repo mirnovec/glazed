@@ -16,6 +16,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ChestMenu;
 import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -84,13 +85,14 @@ public class IronAhRestocker extends Module {
         .build()
     );
 
-    private final Setting<Integer> cycleMinutes = sgGeneral.add(new IntSetting.Builder()
-        .name("limit-cooldown-minutes")
-        .description("Minutes to sit out after the server says you have listed too many items. Nothing else parks the module this long.")
-        .defaultValue(5)
-        .min(1)
-        .max(60)
-        .sliderMax(30)
+    private final Setting<Integer> cycleCooldownSeconds = sgGeneral.add(new IntSetting.Builder()
+        .name("limit-cooldown-seconds")
+        .description("Seconds to sit out after the server says you have listed too many items. Nothing else parks the module this long.")
+        .defaultValue(300)
+        .min(20)
+        .max(300)
+        .sliderMin(20)
+        .sliderMax(300)
         .build()
     );
 
@@ -342,6 +344,7 @@ public class IronAhRestocker extends Module {
         IDLE,
         PRICE_SEND, PRICE_WAIT, PRICE_CLOSE,
         CHEST_OPEN, CHEST_WAIT, GRAB_PICKUP, GRAB_PLACE, GRAB_RETURN, CHEST_CLOSE,
+        SPREAD_OPEN, SPREAD_PICKUP, SPREAD_PLACE, SPREAD_RETURN, SPREAD_CLOSE,
         SELL_SELECT, SELL_SEND, SELL_CONFIRM, SELL_VERIFY, SELL_GAP,
         PULL_OPEN, PULL, PULL_CLOSE,
         REMOVE_SEND, REMOVE_OPEN_MINE, REMOVE_MINE_WAIT, REMOVE_CLICK, REMOVE_RETRY, REMOVE_CLOSE,
@@ -360,6 +363,8 @@ public class IronAhRestocker extends Module {
     private int listed = 0;
     private int grabbed = 0;
     private int sourceChestSlot = -1;
+    private int spreadSourceSlot = -1;
+    private int spread = 0;
     private int stalledPulls = 0;
     private boolean handlingMessage = false;
     private boolean pendingRemoval = false;
@@ -391,6 +396,7 @@ public class IronAhRestocker extends Module {
 
     @Override
     public void onDeactivate() {
+        returnSpreadCursor();
         closeAnyMenu();
         state = State.IDLE;
     }
@@ -401,6 +407,8 @@ public class IronAhRestocker extends Module {
         grabbed = 0;
         waited = 0;
         sourceChestSlot = -1;
+        spreadSourceSlot = -1;
+        spread = 0;
         stalledPulls = 0;
         soldRef = ItemStack.EMPTY;
         countBeforeSale = 0;
@@ -427,6 +435,11 @@ public class IronAhRestocker extends Module {
             case GRAB_PLACE -> tickGrabPlace();
             case GRAB_RETURN -> tickGrabReturn();
             case CHEST_CLOSE -> tickChestClose();
+            case SPREAD_OPEN -> tickSpreadOpen();
+            case SPREAD_PICKUP -> tickSpreadPickup();
+            case SPREAD_PLACE -> tickSpreadPlace();
+            case SPREAD_RETURN -> tickSpreadReturn();
+            case SPREAD_CLOSE -> tickSpreadClose();
             case SELL_SELECT -> tickSellSelect();
             case SELL_SEND -> tickSellSend();
             case SELL_CONFIRM -> tickSellConfirm();
@@ -466,6 +479,18 @@ public class IronAhRestocker extends Module {
                 state = State.REMOVE_SEND;
                 return;
             }
+        }
+
+        // A stack returned by the AH is stock, not one listing. Finish spreading and selling
+        // inventory stock before taking anything else from the source chest.
+        if (hasAnyItemInInventory()) {
+            currentSlot = 0;
+            listed = 0;
+            grabbed = 0;
+            waited = 0;
+            sourceChestSlot = -1;
+            state = State.PRICE_SEND;
+            return;
         }
 
         BlockPos target = lookedAtChest();
@@ -553,7 +578,7 @@ public class IronAhRestocker extends Module {
             return;
         }
 
-        state = State.CHEST_OPEN;
+        state = hasAnyItemInInventory() ? State.SPREAD_OPEN : State.CHEST_OPEN;
     }
 
     /** Cheapest per-unit price across the listings in the menu. */
@@ -790,7 +815,7 @@ public class IronAhRestocker extends Module {
         closeAnyMenu();
         delayCounter = jitter(screenDelay.get(), 1);
 
-        if (grabbed <= 0) {
+        if (grabbed <= 0 && !hasAnyItemInInventory()) {
             // nothing to restock, do not come straight back and re-run the ah command
             endCycleBackoff();
             return;
@@ -799,7 +824,7 @@ public class IronAhRestocker extends Module {
         if (notifications.get()) info("Took %d %s, listing at %d each.", grabbed, itemName(), listPrice);
 
         currentSlot = 0;
-        state = State.SELL_SELECT;
+        state = State.SPREAD_OPEN;
     }
 
     /** First empty player-inventory slot of the open chest menu, in menu indices. */
@@ -815,11 +840,114 @@ public class IronAhRestocker extends Module {
 
     // ---------------------------------------------------------------- listing
 
+    /** Opens the real inventory before splitting any stack. */
+    private void tickSpreadOpen() {
+        if (mc.player.containerMenu != mc.player.inventoryMenu) {
+            closeAnyMenu();
+            delayCounter = jitter(screenDelay.get(), 1);
+            return;
+        }
+
+        if (!(mc.screen instanceof InventoryScreen)) {
+            mc.setScreen(new InventoryScreen(mc.player));
+            delayCounter = jitter(screenDelay.get(), 1);
+        }
+
+        spreadSourceSlot = -1;
+        state = State.SPREAD_PICKUP;
+    }
+
+    /** Picks up one multi-ingot stack. Singles are deliberately ignored. */
+    private void tickSpreadPickup() {
+        if (mc.player.containerMenu != mc.player.inventoryMenu || !(mc.screen instanceof InventoryScreen)) {
+            state = State.SPREAD_OPEN;
+            return;
+        }
+
+        if (!mc.player.inventoryMenu.getCarried().isEmpty()) {
+            state = State.SPREAD_PLACE;
+            return;
+        }
+
+        int source = firstStackedInventorySlot();
+        if (source < 0) {
+            state = State.SPREAD_CLOSE;
+            return;
+        }
+
+        // Keep the source slot empty while spreading. If the stack does not fit completely, the
+        // remainder goes back here and is never exposed to /ah sell.
+        spreadSourceSlot = source;
+        mc.gameMode.handleContainerInput(mc.player.inventoryMenu.containerId,
+            inventoryMenuSlot(source), 0, ContainerInput.PICKUP, mc.player);
+        delayCounter = jitter(clickDelay.get(), 1);
+        state = State.SPREAD_PLACE;
+    }
+
+    /** Right-clicks one ingot into each empty inventory slot. */
+    private void tickSpreadPlace() {
+        if (mc.player.containerMenu != mc.player.inventoryMenu || !(mc.screen instanceof InventoryScreen)) {
+            returnSpreadCursor();
+            state = State.SPREAD_OPEN;
+            return;
+        }
+
+        if (mc.player.inventoryMenu.getCarried().isEmpty()) {
+            spreadSourceSlot = -1;
+            state = State.SPREAD_CLOSE;
+            return;
+        }
+
+        int target = firstEmptyInventorySlotExcept(spreadSourceSlot);
+        if (target < 0) {
+            state = State.SPREAD_RETURN;
+            return;
+        }
+
+        mc.gameMode.handleContainerInput(mc.player.inventoryMenu.containerId,
+            inventoryMenuSlot(target), 1, ContainerInput.PICKUP, mc.player);
+        spread++;
+        delayCounter = jitter(clickDelay.get(), 1);
+    }
+
+    /** Returns the unsplit remainder to its original slot. */
+    private void tickSpreadReturn() {
+        if (mc.player.containerMenu != mc.player.inventoryMenu) {
+            state = State.SPREAD_OPEN;
+            return;
+        }
+
+        returnSpreadCursor();
+        delayCounter = jitter(clickDelay.get(), 1);
+        state = State.SPREAD_CLOSE;
+    }
+
+    private void tickSpreadClose() {
+        returnSpreadCursor();
+        if (mc.screen instanceof InventoryScreen screen) screen.onClose();
+
+        currentSlot = 0;
+        delayCounter = jitter(screenDelay.get(), 1);
+        state = State.SELL_SELECT;
+    }
+
     private void tickSellSelect() {
         if (currentSlot > 8) {
             // the hotbar is the only place /ah sell can reach, so top it back up from below
-            if (hasItemInMainInventory()) {
+            if (hasSingleInMainInventory()) {
                 state = State.PULL_OPEN;
+                return;
+            }
+
+            // Selling the singles creates room. Use it to spread the next part of any retained
+            // stack, then make another singles-only pass.
+            if (hasStackedItemInInventory()) {
+                if (freeInventorySlots() > 0) {
+                    state = State.SPREAD_OPEN;
+                } else {
+                    if (notifications.get()) warning("Keeping an ingot stack because there is no room to spread it into singles.");
+                    endCycleBackoff();
+                }
                 return;
             }
 
@@ -830,7 +958,7 @@ public class IronAhRestocker extends Module {
 
         ItemStack stack = mc.player.getInventory().getItem(currentSlot);
 
-        if (stack.isEmpty() || !stack.is(item.get())) {
+        if (stack.isEmpty() || !stack.is(item.get()) || stack.getCount() != 1) {
             currentSlot++;
             return;
         }
@@ -843,7 +971,9 @@ public class IronAhRestocker extends Module {
     private void tickSellSend() {
         ItemStack stack = mc.player.getInventory().getItem(currentSlot);
 
-        if (stack.isEmpty() || !stack.is(item.get())) {
+        // Last-line safety: a stack can never reach the command even if another state changes
+        // inventory contents between selection and send.
+        if (stack.isEmpty() || !stack.is(item.get()) || stack.getCount() != 1) {
             currentSlot++;
             state = State.SELL_SELECT;
             return;
@@ -935,7 +1065,7 @@ public class IronAhRestocker extends Module {
         }
 
         int target = firstEmptyHotbarSlot();
-        int source = firstMainInventorySlot();
+        int source = firstSingleMainInventorySlot();
 
         if (target < 0 || source < 0) {
             state = State.PULL_CLOSE;
@@ -975,16 +1105,98 @@ public class IronAhRestocker extends Module {
         return -1;
     }
 
-    private int firstMainInventorySlot() {
+    private int firstSingleMainInventorySlot() {
         for (int slot = 9; slot < 36; slot++) {
             ItemStack stack = mc.player.getInventory().getItem(slot);
-            if (!stack.isEmpty() && stack.is(item.get())) return slot;
+            if (!stack.isEmpty() && stack.is(item.get()) && stack.getCount() == 1) return slot;
         }
         return -1;
     }
 
-    private boolean hasItemInMainInventory() {
-        return firstMainInventorySlot() >= 0;
+    private boolean hasSingleInMainInventory() {
+        return firstSingleMainInventorySlot() >= 0;
+    }
+
+    private int firstStackedInventorySlot() {
+        int size = Math.min(36, mc.player.getInventory().getContainerSize());
+
+        for (int slot = 0; slot < size; slot++) {
+            ItemStack stack = mc.player.getInventory().getItem(slot);
+            if (!stack.isEmpty() && stack.is(item.get()) && stack.getCount() > 1) return slot;
+        }
+
+        return -1;
+    }
+
+    private boolean hasStackedItemInInventory() {
+        return firstStackedInventorySlot() >= 0;
+    }
+
+    private boolean hasAnyItemInInventory() {
+        int size = Math.min(36, mc.player.getInventory().getContainerSize());
+
+        for (int slot = 0; slot < size; slot++) {
+            ItemStack stack = mc.player.getInventory().getItem(slot);
+            if (!stack.isEmpty() && stack.is(item.get())) return true;
+        }
+
+        return false;
+    }
+
+    private int freeInventorySlots() {
+        int free = 0;
+        int size = Math.min(36, mc.player.getInventory().getContainerSize());
+
+        for (int slot = 0; slot < size; slot++) {
+            if (mc.player.getInventory().getItem(slot).isEmpty()) free++;
+        }
+
+        return free;
+    }
+
+    private int firstEmptyInventorySlotExcept(int excluded) {
+        int size = Math.min(36, mc.player.getInventory().getContainerSize());
+
+        for (int slot = 0; slot < size; slot++) {
+            if (slot != excluded && mc.player.getInventory().getItem(slot).isEmpty()) return slot;
+        }
+
+        return -1;
+    }
+
+    /** Player inventory index to its slot in InventoryMenu. */
+    private int inventoryMenuSlot(int inventorySlot) {
+        if (inventorySlot >= 0 && inventorySlot <= 8) {
+            return InventoryMenu.USE_ROW_SLOT_START + inventorySlot;
+        }
+
+        return inventorySlot;
+    }
+
+    /** Never close the inventory with the unsplit remainder still attached to the cursor. */
+    private void returnSpreadCursor() {
+        if (mc.player == null || mc.gameMode == null) return;
+        if (mc.player.containerMenu != mc.player.inventoryMenu) return;
+        if (mc.player.inventoryMenu.getCarried().isEmpty()) {
+            spreadSourceSlot = -1;
+            return;
+        }
+
+        int target = spreadSourceSlot;
+        if (target < 0 || target >= 36) target = firstEmptyInventorySlotExcept(-1);
+
+        if (target >= 0) {
+            ItemStack destination = mc.player.getInventory().getItem(target);
+
+            // The original slot should be empty. Merging into the same item is also safe; never
+            // swap the remainder with an unrelated item while recovering from a screen close.
+            if (destination.isEmpty() || destination.is(item.get())) {
+                mc.gameMode.handleContainerInput(mc.player.inventoryMenu.containerId,
+                    inventoryMenuSlot(target), 0, ContainerInput.PICKUP, mc.player);
+            }
+        }
+
+        spreadSourceSlot = -1;
     }
 
     // ---------------------------------------------------------------- listing remover
@@ -1208,11 +1420,11 @@ public class IronAhRestocker extends Module {
         lastCycleFailed = true;
         pendingRemoval = true;
         closeAnyMenu();
-        delayCounter = jitter(cycleMinutes.get() * 60 * 20, 20 * 30);
+        delayCounter = jitter(cycleCooldownSeconds.get() * 20, 20 * 10);
         state = State.COOLDOWN;
 
         // deliberately worded so it cannot match limit-message and re-enter the chat handler
-        if (notifications.get()) info("Parking for about %d minutes.", cycleMinutes.get());
+        if (notifications.get()) info("Parking for about %d seconds.", cycleCooldownSeconds.get());
     }
 
     private void closeAnyMenu() {
