@@ -76,6 +76,7 @@ public class GlazedAddon extends MeteorAddon {
         Modules.get().add(new HomeReset());
         Modules.get().add(new NoBlockInteract());
         Modules.get().add(new OrderDropper());
+        Modules.get().add(new OrderNotifier());
         Modules.get().add(new PlayerDetection());
         Modules.get().add(new PlayerBypass());
         Modules.get().add(new PremiumTunnelBaseFinder());
