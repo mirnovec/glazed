@@ -47,6 +47,7 @@ public class RTPer extends Module {
     }
 
     public enum RTPRegion {
+        DEFAULT(""),          // plain "/rtp", whichever region you are already on
         ASIA("asia"),
         EAST("east"),
         EU_CENTRAL("eu central"),
@@ -65,90 +66,72 @@ public class RTPer extends Module {
         public String getCommandPart() {
             return commandPart;
         }
+
+        /** What to call this in chat, since the plain "/rtp" option has no command part. */
+        public String getLabel() {
+            return commandPart.isEmpty() ? "default" : commandPart;
+        }
     }
 
     public enum MinecraftBiome {
 
-        PLAINS("Plains", "minecraft:plains"),
-        SUNFLOWER_PLAINS("Sunflower Plains", "minecraft:sunflower_plains"),
-        SNOWY_PLAINS("Snowy Plains", "minecraft:snowy_plains"),
-
-        FOREST("Forest", "minecraft:forest"),
-        FLOWER_FOREST("Flower Forest", "minecraft:flower_forest"),
-        BIRCH_FOREST("Birch Forest", "minecraft:birch_forest"),
-        OLD_GROWTH_BIRCH_FOREST("Old Growth Birch Forest", "minecraft:old_growth_birch_forest"),
-        DARK_FOREST("Dark Forest", "minecraft:dark_forest"),
-        OAK_AND_BIRCH_FOREST("Oak and Birch Forest", "minecraft:oak_and_birch_forest"),
-
-        TAIGA("Taiga", "minecraft:taiga"),
-        SNOWY_TAIGA("Snowy Taiga", "minecraft:snowy_taiga"),
-        OLD_GROWTH_SPRUCE_TAIGA("Old Growth Spruce Taiga", "minecraft:old_growth_spruce_taiga"),
-        OLD_GROWTH_PINE_TAIGA("Old Growth Pine Taiga", "minecraft:old_growth_pine_taiga"),
-
-        JUNGLE("Jungle", "minecraft:jungle"),
-        SPARSE_JUNGLE("Sparse Jungle", "minecraft:sparse_jungle"),
-        BAMBOO_JUNGLE("Bamboo Jungle", "minecraft:bamboo_jungle"),
-
-        DESERT("Desert", "minecraft:desert"),
-
-        SAVANNA("Savanna", "minecraft:savanna"),
-        SAVANNA_PLATEAU("Savanna Plateau", "minecraft:savanna_plateau"),
-        WINDSWEPT_SAVANNA("Windswept Savanna", "minecraft:windswept_savanna"),
-
-        BADLANDS("Badlands", "minecraft:badlands"),
-        ERODED_BADLANDS("Eroded Badlands", "minecraft:eroded_badlands"),
-        WOODED_BADLANDS("Wooded Badlands", "minecraft:wooded_badlands"),
-
-        SWAMP("Swamp", "minecraft:swamp"),
-        MANGROVE_SWAMP("Mangrove Swamp", "minecraft:mangrove_swamp"),
-
-        BEACH("Beach", "minecraft:beach"),
-        SNOWY_SLOPES("Snowy Slopes", "minecraft:snowy_slopes"),
+        // the ten that generate emerald, listed first because that is what they are for
         JAGGED_PEAKS("Jagged Peaks", "minecraft:jagged_peaks"),
         FROZEN_PEAKS("Frozen Peaks", "minecraft:frozen_peaks"),
-        STONY_PEAKS("Stony Peaks", "minecraft:stony_peaks"),
-
-        OCEAN("Ocean", "minecraft:ocean"),
-        WARM_OCEAN("Warm Ocean", "minecraft:warm_ocean"),
-        LUKEWARM_OCEAN("Lukewarm Ocean", "minecraft:lukewarm_ocean"),
-        COLD_OCEAN("Cold Ocean", "minecraft:cold_ocean"),
-        FROZEN_OCEAN("Frozen Ocean", "minecraft:frozen_ocean"),
-        DEEP_OCEAN("Deep Ocean", "minecraft:deep_ocean"),
-        DEEP_WARM_OCEAN("Deep Warm Ocean", "minecraft:deep_warm_ocean"),
-        DEEP_LUKEWARM_OCEAN("Deep Lukewarm Ocean", "minecraft:deep_lukewarm_ocean"),
-        DEEP_COLD_OCEAN("Deep Cold Ocean", "minecraft:deep_cold_ocean"),
-        DEEP_FROZEN_OCEAN("Deep Frozen Ocean", "minecraft:deep_frozen_ocean"),
-
-        RIVER("River", "minecraft:river"),
-        FROZEN_RIVER("Frozen River", "minecraft:frozen_river"),
-
-        MUSHROOM_FIELDS("Mushroom Fields", "minecraft:mushroom_fields"),
-
-        DRIPSTONE_CAVES("Dripstone Caves", "minecraft:dripstone_caves"),
-
-        LUSH_CAVES("Lush Caves", "minecraft:lush_caves"),
-
-        DEEP_DARK("Deep Dark", "minecraft:deep_dark"),
-
-        NETHER_WASTES("Nether Wastes", "minecraft:nether_wastes"),
-        SOUL_SAND_VALLEY("Soul Sand Valley", "minecraft:soul_sand_valley"),
-        CRIMSON_FOREST("Crimson Forest", "minecraft:crimson_forest"),
-        WARPED_FOREST("Warped Forest", "minecraft:warped_forest"),
-        BASALT_DELTAS("Basalt Deltas", "minecraft:basalt_deltas"),
-
-        THE_END("The End", "minecraft:the_end"),
-        END_HIGHLANDS("End Highlands", "minecraft:end_highlands"),
-        END_MIDLANDS("End Midlands", "minecraft:end_midlands"),
-        SMALL_END_ISLANDS("Small End Islands", "minecraft:small_end_islands"),
-        END_BARRENS("End Barrens", "minecraft:end_barrens"),
-
-        CAVES("Caves", "minecraft:caves"),
-
+        SNOWY_SLOPES("Snowy Slopes", "minecraft:snowy_slopes"),
         GROVE("Grove", "minecraft:grove"),
-
         MEADOW("Meadow", "minecraft:meadow"),
+        STONY_PEAKS("Stony Peaks", "minecraft:stony_peaks"),
+        CHERRY_GROVE("Cherry Grove", "minecraft:cherry_grove"),
+        WINDSWEPT_HILLS("Windswept Hills", "minecraft:windswept_hills"),
+        WINDSWEPT_FOREST("Windswept Forest", "minecraft:windswept_forest"),
+        WINDSWEPT_GRAVELLY_HILLS("Windswept Gravelly Hills", "minecraft:windswept_gravelly_hills"),
 
-        CHERRY_GROVE("Cherry Grove", "minecraft:cherry_grove");
+        // everything else the overworld can generate, alphabetically
+        BADLANDS("Badlands", "minecraft:badlands"),
+        BAMBOO_JUNGLE("Bamboo Jungle", "minecraft:bamboo_jungle"),
+        BEACH("Beach", "minecraft:beach"),
+        BIRCH_FOREST("Birch Forest", "minecraft:birch_forest"),
+        COLD_OCEAN("Cold Ocean", "minecraft:cold_ocean"),
+        DARK_FOREST("Dark Forest", "minecraft:dark_forest"),
+        DEEP_COLD_OCEAN("Deep Cold Ocean", "minecraft:deep_cold_ocean"),
+        DEEP_DARK("Deep Dark", "minecraft:deep_dark"),
+        DEEP_FROZEN_OCEAN("Deep Frozen Ocean", "minecraft:deep_frozen_ocean"),
+        DEEP_LUKEWARM_OCEAN("Deep Lukewarm Ocean", "minecraft:deep_lukewarm_ocean"),
+        DEEP_OCEAN("Deep Ocean", "minecraft:deep_ocean"),
+        DESERT("Desert", "minecraft:desert"),
+        DRIPSTONE_CAVES("Dripstone Caves", "minecraft:dripstone_caves"),
+        ERODED_BADLANDS("Eroded Badlands", "minecraft:eroded_badlands"),
+        FLOWER_FOREST("Flower Forest", "minecraft:flower_forest"),
+        FOREST("Forest", "minecraft:forest"),
+        FROZEN_OCEAN("Frozen Ocean", "minecraft:frozen_ocean"),
+        FROZEN_RIVER("Frozen River", "minecraft:frozen_river"),
+        ICE_SPIKES("Ice Spikes", "minecraft:ice_spikes"),
+        JUNGLE("Jungle", "minecraft:jungle"),
+        LUKEWARM_OCEAN("Lukewarm Ocean", "minecraft:lukewarm_ocean"),
+        LUSH_CAVES("Lush Caves", "minecraft:lush_caves"),
+        MANGROVE_SWAMP("Mangrove Swamp", "minecraft:mangrove_swamp"),
+        MUSHROOM_FIELDS("Mushroom Fields", "minecraft:mushroom_fields"),
+        OCEAN("Ocean", "minecraft:ocean"),
+        OLD_GROWTH_BIRCH_FOREST("Old Growth Birch Forest", "minecraft:old_growth_birch_forest"),
+        OLD_GROWTH_PINE_TAIGA("Old Growth Pine Taiga", "minecraft:old_growth_pine_taiga"),
+        OLD_GROWTH_SPRUCE_TAIGA("Old Growth Spruce Taiga", "minecraft:old_growth_spruce_taiga"),
+        PALE_GARDEN("Pale Garden", "minecraft:pale_garden"),
+        PLAINS("Plains", "minecraft:plains"),
+        RIVER("River", "minecraft:river"),
+        SAVANNA("Savanna", "minecraft:savanna"),
+        SAVANNA_PLATEAU("Savanna Plateau", "minecraft:savanna_plateau"),
+        SNOWY_BEACH("Snowy Beach", "minecraft:snowy_beach"),
+        SNOWY_PLAINS("Snowy Plains", "minecraft:snowy_plains"),
+        SNOWY_TAIGA("Snowy Taiga", "minecraft:snowy_taiga"),
+        SPARSE_JUNGLE("Sparse Jungle", "minecraft:sparse_jungle"),
+        STONY_SHORE("Stony Shore", "minecraft:stony_shore"),
+        SUNFLOWER_PLAINS("Sunflower Plains", "minecraft:sunflower_plains"),
+        SWAMP("Swamp", "minecraft:swamp"),
+        TAIGA("Taiga", "minecraft:taiga"),
+        WARM_OCEAN("Warm Ocean", "minecraft:warm_ocean"),
+        WINDSWEPT_SAVANNA("Windswept Savanna", "minecraft:windswept_savanna"),
+        WOODED_BADLANDS("Wooded Badlands", "minecraft:wooded_badlands");
 
         private final String displayName;
         private final String id;
@@ -215,10 +198,10 @@ public class RTPer extends Module {
         .build()
     );
 
-    private final Setting<MinecraftBiome> targetBiome = sgBiome.add(new EnumSetting.Builder<MinecraftBiome>()
-        .name("target-biome")
-        .description("Target biome to find.")
-        .defaultValue(MinecraftBiome.PLAINS)
+    private final Setting<List<String>> targetBiomes = sgBiome.add(new StringListSetting.Builder()
+        .name("target-biomes")
+        .description("Biomes to accept. RTP stops as soon as you land in any one of them.")
+        .defaultValue("minecraft:plains")
         .visible(() -> false)
         .build()
     );
@@ -226,7 +209,7 @@ public class RTPer extends Module {
     private final Setting<RTPRegion> rtpRegion = sgGeneral.add(new EnumSetting.Builder<RTPRegion>()
         .name("rtp-region")
         .description("RTP region to use.")
-        .defaultValue(RTPRegion.WEST)
+        .defaultValue(RTPRegion.DEFAULT)
         .build()
     );
 
@@ -239,12 +222,12 @@ public class RTPer extends Module {
 
     private final Setting<Integer> rtpDelay = sgGeneral.add(new IntSetting.Builder()
         .name("rtp-delay")
-        .description("Delay between RTP attempts in seconds.")
+        .description("Delay between RTP attempts in seconds. Below the server's own /rtp cooldown the extra commands just get rejected.")
         .defaultValue(15)
-        .min(11)
-        .max(20)
-        .sliderMin(11)
-        .sliderMax(20)
+        .min(1)
+        .max(100)
+        .sliderMin(1)
+        .sliderMax(100)
         .build()
     );
 
@@ -286,6 +269,7 @@ public class RTPer extends Module {
     private double lastReportedDistance = -1;
     private int targetDistanceBlocks = 1000;
     private boolean biomeFound = false;
+    private MinecraftBiome foundBiome = null;
 
 
     public RTPer() {
@@ -300,6 +284,7 @@ public class RTPer extends Module {
         lastRtpPos = null;
         lastReportedDistance = -1;
         biomeFound = false;
+        foundBiome = null;
 
         if (rtpMode.get() == RTPMode.COORDINATES) {
             targetDistanceBlocks = parseDistance();
@@ -318,13 +303,19 @@ public class RTPer extends Module {
                 toggle();
             }
         } else {
+            if (targetBiomes.get().isEmpty()) {
+                error("No biomes selected. Pick at least one in the biome whitelist.");
+                toggle();
+                return;
+            }
+
             if (notifications.get()) info("RTPer started - Biome Finder mode");
-            if (notifications.get()) info("Target biome: %s", targetBiome.get().getDisplayName());
+            if (notifications.get()) info("Accepting: %s", selectedSummary());
         }
         if (rtpMode.get() == RTPMode.COORDINATES &&
             (rtpRegion.get() == RTPRegion.NETHER || rtpRegion.get() == RTPRegion.END)) {
             if (notifications.get()) warning("Using %s region with coordinate mode - make sure your coordinates are valid for this dimension!",
-                rtpRegion.get().getCommandPart());
+                rtpRegion.get().getLabel());
         }
     }
 
@@ -369,7 +360,7 @@ public class RTPer extends Module {
             if (webhookEnabled.get()) {
                 sendWebhook("Target Reached!",
                     String.format("Got to %d, %d in %s\\nDistance: %.1f/%d blocks\\nAttempts: %d",
-                        targetX.get(), targetZ.get(), rtpRegion.get().getCommandPart(),
+                        targetX.get(), targetZ.get(), rtpRegion.get().getLabel(),
                         currentDistance, targetDistanceBlocks, rtpAttempts),
                     0x00FF00);
             }
@@ -393,12 +384,13 @@ public class RTPer extends Module {
 
     private void handleBiomeMode() {
         if (biomeFound) {
-            if (notifications.get()) info("Target biome found: %s", targetBiome.get().getDisplayName());
+            String name = foundBiome != null ? foundBiome.getDisplayName() : getCurrentBiome();
+            if (notifications.get()) info("Target biome found: %s", name);
 
             if (webhookEnabled.get()) {
                 sendWebhook("Biome Found!",
                     String.format("Found %s biome in %s!\\nAttempts: %d\\nPosition: %d, %d, %d",
-                        targetBiome.get().getDisplayName(), rtpRegion.get().getCommandPart(), rtpAttempts,
+                        name, rtpRegion.get().getLabel(), rtpAttempts,
                         mc.player.blockPosition().getX(), mc.player.blockPosition().getY(), mc.player.blockPosition().getZ()),
                     0x00FF00);
             }
@@ -412,7 +404,9 @@ public class RTPer extends Module {
             return;
         }
 
-        if (isInTargetBiome()) {
+        MinecraftBiome match = matchedBiome();
+        if (match != null) {
+            foundBiome = match;
             biomeFound = true;
             return;
         }
@@ -423,13 +417,52 @@ public class RTPer extends Module {
         }
     }
 
-    private boolean isInTargetBiome() {
-        if (mc.level == null || mc.player == null) return false;
+    private boolean isSelected(MinecraftBiome biome) {
+        return targetBiomes.get().contains(biome.getId());
+    }
 
-        BlockPos pos = mc.player.blockPosition();
-        String biomeId = getBiomeIdAt(pos);
-        if (biomeId == null) return false;
-        return biomeId.equals(targetBiome.get().getId());
+    private void toggleSelected(MinecraftBiome biome) {
+        List<String> updated = new ArrayList<>(targetBiomes.get());
+
+        if (!updated.remove(biome.getId())) updated.add(biome.getId());
+
+        targetBiomes.set(updated);
+    }
+
+    /** What to call the whitelist in chat, short enough to not flood it. */
+    private String selectedSummary() {
+        List<String> ids = targetBiomes.get();
+        if (ids.isEmpty()) return "none";
+
+        List<String> names = new ArrayList<>();
+        for (String id : ids) {
+            String name = null;
+            for (MinecraftBiome biome : MinecraftBiome.values()) {
+                if (biome.getId().equals(id)) { name = biome.getDisplayName(); break; }
+            }
+            names.add(name != null ? name : toDisplayName(id));
+        }
+
+        if (names.size() <= 3) return String.join(", ", names);
+        return names.size() + " biomes: " + String.join(", ", names.subList(0, 3)) + ", ...";
+    }
+
+    /** The whitelisted biome you are standing in, or null. */
+    private MinecraftBiome matchedBiome() {
+        if (mc.level == null || mc.player == null) return null;
+
+        String biomeId = getBiomeIdAt(mc.player.blockPosition());
+        if (biomeId == null || !targetBiomes.get().contains(biomeId)) return null;
+
+        for (MinecraftBiome biome : MinecraftBiome.values()) {
+            if (biome.getId().equals(biomeId)) return biome;
+        }
+
+        return null;
+    }
+
+    private boolean isInTargetBiome() {
+        return matchedBiome() != null;
     }
 
     private String getCurrentBiome() {
@@ -517,7 +550,9 @@ public class RTPer extends Module {
                     if (notifications.get()) info("RTP %d done - pos: (%d, %d, %d) biome: %s",
                         rtpAttempts, currentPos.getX(), currentPos.getY(), currentPos.getZ(), biome);
 
-                    if (isInTargetBiome()) {
+                    MinecraftBiome match = matchedBiome();
+                    if (match != null) {
+                        foundBiome = match;
                         biomeFound = true;
                     }
                 }
@@ -530,15 +565,15 @@ public class RTPer extends Module {
 
         isRtping = true;
 
-        ChatUtils.sendPlayerMsg("/rtp " + rtpRegion.get().getCommandPart());
+        ChatUtils.sendPlayerMsg(("/rtp " + rtpRegion.get().getCommandPart()).trim());
 
         if (rtpMode.get() == RTPMode.COORDINATES) {
             double currentDistance = getCurrentDistance();
             if (notifications.get()) info("Attempting RTP (%s) - current: %.1f blocks",
-                rtpRegion.get().getCommandPart(), currentDistance);
+                rtpRegion.get().getLabel(), currentDistance);
         } else {
-            if (notifications.get()) info("Attempting RTP (%s) - searching for %s biome",
-                rtpRegion.get().getCommandPart(), targetBiome.get().getDisplayName());
+            if (notifications.get()) info("Attempting RTP (%s) - searching for %s",
+                rtpRegion.get().getLabel(), selectedSummary());
         }
     }
 
@@ -620,8 +655,8 @@ public class RTPer extends Module {
     public WWidget getWidget(GuiTheme theme) {
         WTable table = theme.table();
 
-        table.add(theme.label("Biome Picker:"));
-        WLabel current = table.add(theme.label(targetBiome.get().getDisplayName())).expandX().widget();
+        table.add(theme.label("Biome whitelist:"));
+        WLabel current = table.add(theme.label(selectedSummary())).expandX().widget();
         WButton open = table.add(theme.button("Select")).widget();
         open.action = () -> {
             if (rtpMode.get() == RTPMode.BIOME) mc.setScreen(new BiomePickerScreen(theme, current));
@@ -631,13 +666,14 @@ public class RTPer extends Module {
         return table;
     }
 
+    /** Whitelist rather than a single choice: RTP stops on whichever one you land in first. */
     private class BiomePickerScreen extends WindowScreen {
         private WTable listTable;
         private WTextBox searchBox;
         private final WLabel currentLabel;
 
         public BiomePickerScreen(GuiTheme theme, WLabel currentLabel) {
-            super(theme, "Select Biome");
+            super(theme, "Select Biomes");
             this.currentLabel = currentLabel;
         }
 
@@ -647,9 +683,25 @@ public class RTPer extends Module {
             searchBox.setFocused(true);
             searchBox.action = this::reloadList;
 
+            WTable actions = add(theme.table()).expandX().widget();
+
+            WButton clear = actions.add(theme.button("Clear all")).widget();
+            clear.action = () -> {
+                targetBiomes.set(new ArrayList<>());
+                refresh();
+            };
+
+            WButton close = actions.add(theme.button("Done")).widget();
+            close.action = () -> mc.setScreen(null);
+
             add(theme.horizontalSeparator()).expandX();
 
             listTable = add(theme.table()).expandX().widget();
+            reloadList();
+        }
+
+        private void refresh() {
+            if (currentLabel != null) currentLabel.set(selectedSummary());
             reloadList();
         }
 
@@ -661,13 +713,16 @@ public class RTPer extends Module {
                 String name = biome.getDisplayName();
                 if (!query.isEmpty() && !name.toLowerCase().contains(query)) continue;
 
-                listTable.add(theme.label(name)).expandX();
-                WButton select = listTable.add(theme.button("Use")).widget();
-                select.action = () -> {
-                    targetBiome.set(biome);
-                    if (currentLabel != null) currentLabel.set(biome.getDisplayName());
-                    mc.setScreen(null);
+                boolean selected = isSelected(biome);
+
+                listTable.add(theme.label((selected ? "[x] " : "[ ] ") + name)).expandX();
+
+                WButton toggle = listTable.add(theme.button(selected ? "Remove" : "Add")).widget();
+                toggle.action = () -> {
+                    toggleSelected(biome);
+                    refresh();
                 };
+
                 listTable.row();
             }
         }
