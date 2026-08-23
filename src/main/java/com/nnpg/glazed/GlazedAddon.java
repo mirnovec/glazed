@@ -65,6 +65,8 @@ public class GlazedAddon extends MeteorAddon {
 
         // main
         Modules.get().add(new AHSell());
+        Modules.get().add(new AHSniper());
+        Modules.get().add(new AdvancedOrderSniper());
         Modules.get().add(new AhShieldSeller());
         Modules.get().add(new AdminHud());
         Modules.get().add(new AdminList());
@@ -90,6 +92,7 @@ public class GlazedAddon extends MeteorAddon {
         Modules.get().add(new IronAhRestocker());
         Modules.get().add(new NoBlockInteract());
         Modules.get().add(new OrderDropper());
+        Modules.get().add(new OrderNotifier());
         Modules.get().add(new PlayerDetection());
         Modules.get().add(new PlayerBypass());
         Modules.get().add(new PremiumTunnelBaseFinder());
