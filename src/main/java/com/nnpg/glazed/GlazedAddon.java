@@ -59,6 +59,7 @@ public class GlazedAddon extends MeteorAddon {
         // main
         Modules.get().add(new AHSell());
         Modules.get().add(new AHSniper());
+        Modules.get().add(new AdvancedOrderSniper());
         Modules.get().add(new AdminHud());
         Modules.get().add(new AdminList());
         Modules.get().add(new AutoPearlChain());
