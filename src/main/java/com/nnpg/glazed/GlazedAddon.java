@@ -1,5 +1,6 @@
 package com.nnpg.glazed;
 
+import com.nnpg.glazed.commands.BCopyCommand;
 import com.nnpg.glazed.commands.BedrockCommand;
 import com.nnpg.glazed.commands.DeathPosCommand;
 import com.nnpg.glazed.commands.RemoverTestCommand;
@@ -32,6 +33,7 @@ public class GlazedAddon extends MeteorAddon {
     @Override
     public void onInitialize() {
         // commands
+        Commands.add(new BCopyCommand());
         Commands.add(new BedrockCommand());
         Commands.add(new DeathPosCommand());
         Commands.add(new RemoverTestCommand());
