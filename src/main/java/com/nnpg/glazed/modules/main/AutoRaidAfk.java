@@ -2,12 +2,21 @@ package com.nnpg.glazed.modules.main;
 
 import com.nnpg.glazed.GlazedAddon;
 import com.nnpg.glazed.VersionUtil;
+import meteordevelopment.meteorclient.events.game.OpenScreenEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
+import meteordevelopment.meteorclient.gui.WidgetScreen;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.gui.components.BossHealthOverlay;
+import net.minecraft.client.gui.screens.DeathScreen;
+import net.minecraft.client.gui.screens.DisconnectedScreen;
+import net.minecraft.client.gui.screens.PauseScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.player.ClientInput;
+import net.minecraft.client.player.KeyboardInput;
 import net.minecraft.world.BossEvent;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -38,6 +47,7 @@ public class AutoRaidAfk extends Module {
     private final SettingGroup sgClicking = settings.createGroup("Clicking");
     private final SettingGroup sgRaid = settings.createGroup("Raid detection");
     private final SettingGroup sgBottle = settings.createGroup("Ominous bottle");
+    private final SettingGroup sgFreeze = settings.createGroup("Freeze");
 
     private final Setting<Double> attackRange = sgGeneral.add(new DoubleSetting.Builder()
         .name("attack-range")
@@ -59,6 +69,29 @@ public class AutoRaidAfk extends Module {
         .name("avoid-blocks")
         .description("Hold the clicks while your crosshair is on a block, so a stray left click does not start mining the farm.")
         .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> freeze = sgFreeze.add(new BoolSetting.Builder()
+        .name("freeze")
+        .description("Lock the game while this runs. Movement dies, Escape stops opening the pause menu and screens stop opening at all, until you turn the module off. The Meteor menu still opens, which is how you get back out.")
+        .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<Blocked> blocked = sgFreeze.add(new EnumSetting.Builder<Blocked>()
+        .name("block-screens")
+        .description("How much the freeze swallows. Everything stops every screen, Pause only stops Escape. The death and disconnect screens always get through either way.")
+        .defaultValue(Blocked.Everything)
+        .visible(freeze::get)
+        .build()
+    );
+
+    private final Setting<Boolean> lockLook = sgFreeze.add(new BoolSetting.Builder()
+        .name("lock-look")
+        .description("Hold the camera where it was when the freeze started, so a knocked mouse cannot turn you away from the mobs.")
+        .defaultValue(true)
+        .visible(freeze::get)
         .build()
     );
 
@@ -183,6 +216,11 @@ public class AutoRaidAfk extends Module {
 
     private final Random random = new Random();
 
+    private boolean frozen = false;
+    private ClientInput blankInput = null;
+    private float lockYaw = 0f;
+    private float lockPitch = 0f;
+
     private State state = State.WATCH;
     private int clickCounter;
     private int raidGoneTicks;
@@ -210,6 +248,8 @@ public class AutoRaidAfk extends Module {
         nagCounter = 0;
         warnedNoBossBar = false;
         clicks = 0;
+        frozen = false;
+        blankInput = null;
 
         if (mc.player == null || mc.level == null) {
             error("Join a world first.");
@@ -228,8 +268,9 @@ public class AutoRaidAfk extends Module {
 
     @Override
     public void onDeactivate() {
-        // never leave the use key stuck down, whatever we were in the middle of
+        // never leave the use key stuck down, or the game locked, whatever we were in the middle of
         releaseUse();
+        releaseFreeze();
         state = State.WATCH;
         prevSlot = -1;
     }
@@ -237,6 +278,9 @@ public class AutoRaidAfk extends Module {
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.level == null) return;
+
+        if (freeze.get()) applyFreeze();
+        else if (frozen) releaseFreeze();
 
         switch (state) {
             case WATCH -> tickWatch();
@@ -508,6 +552,87 @@ public class AutoRaidAfk extends Module {
         nagCounter = 200;
     }
 
+    // ---------------------------------------------------------------- the freeze
+
+    /**
+     * Swallows every screen while the freeze is on. Meteor's own menu is deliberately let through,
+     * because with movement and Escape gone it is the only way left to turn this off, and the death
+     * and disconnect screens are let through because blocking either one strands you.
+     */
+    @EventHandler
+    private void onOpenScreen(OpenScreenEvent event) {
+        if (!frozen) return;
+
+        Screen screen = event.screen;
+
+        if (screen == null) return;
+        if (screen instanceof WidgetScreen) return;
+        if (screen instanceof DeathScreen) return;
+        if (screen instanceof DisconnectedScreen) return;
+        if (blocked.get() == Blocked.Pause && !(screen instanceof PauseScreen)) return;
+
+        event.setCancelled(true);
+    }
+
+    /**
+     * Swaps the player's input for a bare ClientInput, whose tick() does nothing at all. That kills
+     * every movement key at the source instead of fighting them one at a time, every tick.
+     */
+    private void applyFreeze() {
+        if (!frozen) {
+            lockYaw = mc.player.getYRot();
+            lockPitch = mc.player.getXRot();
+            frozen = true;
+
+            if (notifications.get()) info("Frozen. The Meteor menu still opens, turn this off to move again.");
+        }
+
+        // respawning or changing dimension hands you a new player with a fresh input, so keep looking
+        if (mc.player.input != blankInput) {
+            blankInput = new ClientInput();
+            mc.player.input = blankInput;
+        }
+
+        if (lockLook.get()) {
+            mc.player.setYRot(lockYaw);
+            mc.player.setXRot(lockPitch);
+            mc.player.yRotO = lockYaw;
+            mc.player.xRotO = lockPitch;
+        }
+
+        drainKeys();
+    }
+
+    /** Hands back a fresh keyboard input rather than a stored one, since the player may have changed. */
+    private void releaseFreeze() {
+        if (!frozen) return;
+
+        frozen = false;
+        blankInput = null;
+
+        if (mc.player != null && mc.options != null) mc.player.input = new KeyboardInput(mc.options);
+        if (notifications.get()) info("Unfrozen.");
+    }
+
+    /** Presses queue up whether or not anything reads them, so empty the ones that would fire later. */
+    private void drainKeys() {
+        drain(mc.options.keyInventory);
+        drain(mc.options.keyDrop);
+        drain(mc.options.keySwapOffhand);
+        drain(mc.options.keyChat);
+        drain(mc.options.keyCommand);
+        drain(mc.options.keyPickItem);
+        drain(mc.options.keyTogglePerspective);
+
+        for (KeyMapping slot : mc.options.keyHotbarSlots) drain(slot);
+    }
+
+    /** Never call this on the use key. The bottle drink holds that one down on purpose. */
+    private void drain(KeyMapping key) {
+        while (key.consumeClick());
+        key.setDown(false);
+    }
+
     @Override
     public String getInfoString() {
         return switch (state) {
@@ -515,6 +640,8 @@ public class AutoRaidAfk extends Module {
             case DRINK_SWAP, DRINK_HOLD -> "drinking";
         };
     }
+
+    public enum Blocked { Everything, Pause }
 
     public enum Targets {
         Raiders,
