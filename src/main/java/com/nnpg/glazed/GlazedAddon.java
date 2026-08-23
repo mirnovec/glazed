@@ -1,5 +1,6 @@
 package com.nnpg.glazed;
 
+import com.nnpg.glazed.commands.BedrockCommand;
 import com.nnpg.glazed.commands.DeathPosCommand;
 import com.nnpg.glazed.commands.RemoverTestCommand;
 import com.nnpg.glazed.modules.esp.*;
@@ -31,6 +32,7 @@ public class GlazedAddon extends MeteorAddon {
     @Override
     public void onInitialize() {
         // commands
+        Commands.add(new BedrockCommand());
         Commands.add(new DeathPosCommand());
         Commands.add(new RemoverTestCommand());
 
@@ -74,6 +76,7 @@ public class GlazedAddon extends MeteorAddon {
         Modules.get().add(new AutoPearlChain());
         Modules.get().add(new AutoRaidAfk());
         Modules.get().add(new AutoSell());
+        Modules.get().add(new BedrockLogger());
         Modules.get().add(new AutoSpawnerSell());
         Modules.get().add(new BoatSeller());
         Modules.get().add(new ChestAndShulkerStealer());
