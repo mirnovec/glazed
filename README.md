@@ -16,23 +16,28 @@
 
 **Glazed** is a free Meteor Client addon designed specifically for the **DonutSMP** server. I made this to automate the boring and repetitive tasks I kept doing in-game and to give others access to high-quality tools **without paying**. I've seen many paid clients that do less than this one — this is my free alternative.
 
-**66 modules** across 3 categories. Minecraft **1.21.4, 1.21.11, 26.1.2**.
+**72 modules** across 3 categories. Minecraft **1.21.4, 1.21.11, 26.1.2**.
 
 ---
 
 ## 🚀Features
 
-### Main Modules (30)
+### Main Modules (36)
 
 | Module | Description |
 |---|---|
 | Admin Hud | Tells you when staff are in tab with live skin faces |
 | Admin List | List of administrators to be ignored by other modules |
 | AH Sell | Automatically sells all hotbar items using /ah sell |
+| AH Sniper | Buys AH listings that fall inside a price window, one verified transaction at a time |
+| Advanced Order Sniper | Sells into the highest-paying order and refills from a chest or your own saved order |
 | Ah Shield Seller | Takes a chest of shields, undercuts the cheapest listing and collects unsold ones back |
 | Auto Pearl Chain | Chains pearls after teleport detection |
 | Auto Sell | Automatically sells items |
 | Auto Spawner Sell | Drops bones from spawner and sells them |
+| Bedrock Logger | Records exposed nether bedrock in the format a seed cracker reads |
+| Boat Seller | Lists boats on the AH, undercuts the market and reclaims what does not sell |
+| Chest Seller | Empties the chest you are looking at into /sell, over and over |
 | Coord Snapper | Copies coordinates to clipboard + optional webhook |
 | Emergency Order | Dumps an item into /order when a watched player gets close |
 | Emergency Seller | Panic-sells selected items |
@@ -45,6 +50,7 @@
 | Iron Ah Restocker | Reads the cheapest AH price and keeps it stocked with single ingots from a chest |
 | No Block Interact | Pearl through containers by blocking GUI interactions |
 | Order Dropper | Processes orders + drops items |
+| Order Notifier | Sounds an alarm when a matching order is worth more than your threshold |
 | Player Detection | Detects players in the world |
 | Premium Tunnel Base Finder | Advanced tunnel mining with lava detection, pearl-through, and safety systems |
 | Rain Noti | Notifies when it starts raining with webhook support |
