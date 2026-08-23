@@ -1,9 +1,11 @@
 package com.nnpg.glazed;
 
+import com.nnpg.glazed.commands.BedrockCommand;
 import com.nnpg.glazed.modules.esp.*;
 import com.nnpg.glazed.modules.main.*;
 import com.nnpg.glazed.modules.pvp.*;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
+import meteordevelopment.meteorclient.commands.Commands;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.orbit.EventHandler;
@@ -27,6 +29,9 @@ public class GlazedAddon extends MeteorAddon {
 
     @Override
     public void onInitialize() {
+        // commands
+        Commands.add(new BedrockCommand());
+
         // esp
         Modules.get().add(new AdvancedStashFinder());
         Modules.get().add(new AmethystESP());
@@ -62,6 +67,7 @@ public class GlazedAddon extends MeteorAddon {
         Modules.get().add(new AdminList());
         Modules.get().add(new AutoPearlChain());
         Modules.get().add(new AutoSell());
+        Modules.get().add(new BedrockLogger());
         Modules.get().add(new AutoSpawnerSell());
         Modules.get().add(new ChestAndShulkerStealer());
         Modules.get().add(new CoordSnapper());
