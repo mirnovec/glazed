@@ -1,6 +1,10 @@
 package com.nnpg.glazed;
 
+import com.nnpg.glazed.commands.BCopyCommand;
+import com.nnpg.glazed.commands.BedrockCommand;
+import com.nnpg.glazed.commands.DebrisCommand;
 import com.nnpg.glazed.commands.DeathPosCommand;
+import com.nnpg.glazed.commands.OreCommand;
 import com.nnpg.glazed.commands.RemoverTestCommand;
 import com.nnpg.glazed.modules.esp.*;
 import com.nnpg.glazed.modules.main.*;
@@ -12,6 +16,9 @@ import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.packets.PacketEvent;
+import com.nnpg.glazed.utils.DonutRegion;
+import net.minecraft.network.protocol.game.ServerboundChatCommandPacket;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -31,7 +38,11 @@ public class GlazedAddon extends MeteorAddon {
     @Override
     public void onInitialize() {
         // commands
+        Commands.add(new BCopyCommand());
+        Commands.add(new BedrockCommand());
+        Commands.add(new DebrisCommand());
         Commands.add(new DeathPosCommand());
+        Commands.add(new OreCommand());
         Commands.add(new RemoverTestCommand());
 
         // esp
@@ -46,12 +57,16 @@ public class GlazedAddon extends MeteorAddon {
         Modules.get().add(new DeepslateESP());
         Modules.get().add(new DrownedTridentESP());
         Modules.get().add(new DripstoneESP());
+        Modules.get().add(new EmOre());
         Modules.get().add(new HoleTunnelStairsESP());
         Modules.get().add(new InvisESP());
         Modules.get().add(new KelpESP());
         Modules.get().add(new LamaESP());
         Modules.get().add(new LightESP());
+        Modules.get().add(new DebrisLeakESP());
+        Modules.get().add(new NetheriteFinder());
         Modules.get().add(new OneByOneHoles());
+        Modules.get().add(new OverworldOreFinder());
         Modules.get().add(new PillagerESP());
         Modules.get().add(new PistonESP());
         Modules.get().add(new RegionMap());
@@ -65,15 +80,20 @@ public class GlazedAddon extends MeteorAddon {
 
         // main
         Modules.get().add(new AHSell());
+        Modules.get().add(new AHSniper());
+        Modules.get().add(new AdvancedOrderSniper());
         Modules.get().add(new AhShieldSeller());
         Modules.get().add(new AdminHud());
         Modules.get().add(new AdminList());
         Modules.get().add(new AutoLeave());
+        Modules.get().add(new BedrockLogger());
         Modules.get().add(new AutoPearlChain());
         Modules.get().add(new AutoRaidAfk());
         Modules.get().add(new AutoSell());
         Modules.get().add(new AutoSpawnerSell());
+        Modules.get().add(new BoatSeller());
         Modules.get().add(new ChestAndShulkerStealer());
+        Modules.get().add(new ChestSeller());
         Modules.get().add(new CoordSnapper());
         Modules.get().add(new EmergencyOrder());
         Modules.get().add(new EmergencySeller());
@@ -88,6 +108,7 @@ public class GlazedAddon extends MeteorAddon {
         Modules.get().add(new IronAhRestocker());
         Modules.get().add(new NoBlockInteract());
         Modules.get().add(new OrderDropper());
+        Modules.get().add(new OrderNotifier());
         Modules.get().add(new PlayerDetection());
         Modules.get().add(new PlayerBypass());
         Modules.get().add(new PremiumTunnelBaseFinder());
@@ -99,13 +120,16 @@ public class GlazedAddon extends MeteorAddon {
         Modules.get().add(new SlabCrafter());
         Modules.get().add(new SlabSeller());
         Modules.get().add(new SlabUltimate());
+        Modules.get().add(new SmoothSlabCrafter());
         Modules.get().add(new ShulkerDropper());
         Modules.get().add(new SpawnerDropper());
         Modules.get().add(new SpawnerOrder());
         Modules.get().add(new SpawnerProtect());
+        Modules.get().add(new SpruceMacro());
         Modules.get().add(new SpotifyHud());
         Modules.get().add(new TabDetector());
         Modules.get().add(new TpaMacro());
+        Modules.get().add(new UltraSell());
 
         // pvp
         Modules.get().add(new AimAssist());
@@ -128,6 +152,16 @@ public class GlazedAddon extends MeteorAddon {
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
         MyScreen.resetSessionCheck();
+        DonutRegion.reset();
+    }
+
+    // the regions are separate worlds with separate seeds, and /rtp is how you move between them
+    @EventHandler
+    private void onPacketSend(PacketEvent.Send event) {
+        if (!(event.packet instanceof ServerboundChatCommandPacket packet)) return;
+
+        DonutRegion region = DonutRegion.fromCommand(packet.command());
+        if (region != null) DonutRegion.set(region);
     }
 
     @Override

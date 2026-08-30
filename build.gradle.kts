@@ -90,3 +90,26 @@ tasks {
         options.compilerArgs.addAll(listOf("-Xmaxerrs", "10000"))
     }
 }
+
+tasks.register<JavaExec>("validateEmeraldBiomes") {
+    group = "verification"
+    description = "Replays the logged emerald candidates with vanilla direct and fiddled biome lookup."
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("com.nnpg.glazed.validation.EmeraldBiomeHarness")
+}
+
+tasks.register<JavaExec>("probeVanillaHeightmap") {
+    group = "verification"
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("com.nnpg.glazed.validation.RegionHeightProbe")
+}
+
+tasks.register<JavaExec>("validateSeedWorld") {
+    group = "verification"
+    description = "Replays emerald placement through the shipped SeedWorld and checks its floors against a real server."
+    dependsOn(tasks.testClasses)
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("com.nnpg.glazed.validation.SeedWorldRegression")
+}

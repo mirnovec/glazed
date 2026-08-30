@@ -10,7 +10,10 @@
     "ClientPlayNetworkHandlerMixin",
     "CameraMixin",
     "EntityMixin",
-    "TridentItemMixin"
+    "TridentItemMixin",
+    "CountPlacementAccessor",
+    "HeightRangePlacementAccessor",
+    "RarityFilterAccessor"
   ],
   "injectors": {
     "defaultRequire": 1
