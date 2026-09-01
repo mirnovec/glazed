@@ -22,7 +22,6 @@ import java.util.Locale;
 import java.util.Random;
 import java.util.regex.Pattern;
 
-/** Watches the highest matching order without clicking or fulfilling it. */
 public class OrderNotifier extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgTiming = settings.createGroup("Timing and safety");

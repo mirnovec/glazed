@@ -31,7 +31,6 @@ import java.util.Locale;
 import java.util.Random;
 import java.util.regex.Pattern;
 
-/** Fulfils the highest matching order, then optionally refills from a block or the player's saved order. */
 public class AdvancedOrderSniper extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgRefill = settings.createGroup("Refill");
@@ -453,8 +452,6 @@ public class AdvancedOrderSniper extends Module {
         state = State.COOLDOWN;
     }
 
-    // ------------------------------------------------------------ looked-at chest refill
-
     private void openRefillChest() {
         closeMenu();
         if (refillPos == null || !isStorage(refillPos)) {
@@ -509,8 +506,6 @@ public class AdvancedOrderSniper extends Module {
             state = State.CHEST_TAKE;
         }
     }
-
-    // ------------------------------------------------------------ saved-order refill
 
     private void sendSavedOrders() {
         closeMenu();
@@ -604,8 +599,6 @@ public class AdvancedOrderSniper extends Module {
         state = State.COOLDOWN;
     }
 
-    // ------------------------------------------------------------ messages and recovery
-
     @EventHandler
     private void onChatMessage(ReceiveMessageEvent event) {
         if (!isActive()) return;
@@ -684,8 +677,6 @@ public class AdvancedOrderSniper extends Module {
         lastMenuId = Integer.MIN_VALUE;
         lastSignature = 0;
     }
-
-    // ------------------------------------------------------------ menu and inventory helpers
 
     private int countTarget() {
         int count = 0;

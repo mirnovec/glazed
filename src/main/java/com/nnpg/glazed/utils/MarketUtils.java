@@ -13,7 +13,6 @@ import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Shared, deliberately conservative parsing for auction and order menu entries. */
 public final class MarketUtils {
     private static Object menuOwner;
     private static final Pattern MONEY = Pattern.compile("\\$\\s*([0-9][0-9,]*(?:\\.[0-9]+)?)\\s*([KkMmBb])?");
@@ -24,7 +23,6 @@ public final class MarketUtils {
 
     private MarketUtils() {}
 
-    /** Prevents the new AH/order automations from issuing commands into each other's menus. */
     public static synchronized boolean acquireMenu(Object requester) {
         if (menuOwner == null || menuOwner == requester) {
             menuOwner = requester;
@@ -68,7 +66,6 @@ public final class MarketUtils {
         return String.join(" ", textLines(stack)).toLowerCase(Locale.ROOT);
     }
 
-    /** If both an item and a search term are configured, both must match. AIR and blank disable that side. */
     public static boolean matches(ItemStack stack, Item item, String searchTerm) {
         if (stack == null || stack.isEmpty()) return false;
 

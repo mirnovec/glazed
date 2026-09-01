@@ -11,12 +11,6 @@ import net.minecraft.world.level.biome.Biome;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Copies where you are standing, as "x y z | biome | dimension", so it can be pasted somewhere.
- *
- * Repeat calls stack up in one clipboard payload, so several places can be sampled in a single trip
- * and pasted once at the end. ".bcopy clear" starts a fresh list.
- */
 public class BCopyCommand extends Command {
     private static final List<String> samples = new ArrayList<>();
 
@@ -61,7 +55,7 @@ public class BCopyCommand extends Command {
             Identifier id = mc.level.registryAccess().lookupOrThrow(Registries.BIOME).getKey(biome);
             if (id != null) return id.toString();
         } catch (Exception ignored) {
-            // fall through to the holder key below
+
         }
 
         return mc.level.getBiome(pos).unwrapKey().map(key -> key.identifier().toString()).orElse("unknown");

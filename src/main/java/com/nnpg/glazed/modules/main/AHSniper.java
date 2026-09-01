@@ -23,7 +23,6 @@ import java.util.Locale;
 import java.util.Random;
 import java.util.regex.Pattern;
 
-/** Slow, transaction-based AH sniper for the current Donut auction menus. */
 public class AHSniper extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgSafety = settings.createGroup("Safety");

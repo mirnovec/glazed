@@ -29,21 +29,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/**
- * Records nether bedrock positions in the format the Nether Bedrock Cracker expects, so the world
- * seed can be recovered from them. Bedrock has been seed dependent since 1.18.
- *
- * Only blocks with an exposed face get written. Server side anti-xray rewrites blocks that are
- * fully buried but never ones you could already see, so an exposed block is the only kind we can
- * trust. Logging buried blocks would quietly poison the data set and the crack would just fail
- * with no explanation.
- */
 public class BedrockLogger extends Module {
 
     private static final Path FILE = Minecraft.getInstance().gameDirectory.toPath()
         .resolve("glazed").resolve("nether_bedrock.txt");
 
-    // packed positions we have already written, so re-enabling never duplicates a line
     private static final Set<Long> logged = new HashSet<>();
     private static boolean fileRead = false;
 
@@ -159,18 +149,14 @@ public class BedrockLogger extends Module {
         if (++tickCounter < 40) return;
         tickCounter = 0;
 
-        // chunks already loaded when you toggled on never fire ChunkDataEvent
         scanLoadedChunks();
 
-        // and the chunks around you get another look, so bedrock you just dug out gets picked up
         rescanNearby();
     }
 
     private void scanLoadedChunks() {
         if (mc.level == null) return;
 
-        // a full sweep is a couple of million block lookups at high render distance, so each
-        // chunk is only walked once
         for (ChunkAccess chunk : Utils.chunks(false)) {
             if (scannedChunks.contains(chunk.getPos().pack())) continue;
             scanChunk(chunk);
@@ -237,20 +223,14 @@ public class BedrockLogger extends Module {
         }
     }
 
-    /**
-     * A block counts as exposed when at least one neighbour lets light or a player see it. Anything
-     * fully walled in by solid blocks is exactly what anti-xray is allowed to lie about.
-     */
     private boolean isExposed(BlockPos pos) {
         BlockPos.MutableBlockPos side = new BlockPos.MutableBlockPos();
 
         for (Direction dir : Direction.values()) {
             side.set(pos).move(dir);
 
-            // outside the world vertically counts as solid, not as an opening
             if (side.getY() < mc.level.getMinY() || side.getY() > mc.level.getMaxY()) continue;
 
-            // an unloaded neighbour reads as air and would be a false positive
             if (!mc.level.isLoaded(side)) continue;
 
             if (!mc.level.getBlockState(side).canOcclude()) return true;
@@ -264,7 +244,6 @@ public class BedrockLogger extends Module {
         logged.add(BlockPos.asLong(x, y, z));
     }
 
-    /** One file open per chunk instead of one per block. A full layer sweep is 256 positions. */
     private void flush() {
         if (pending.isEmpty()) return;
 
@@ -279,7 +258,7 @@ public class BedrockLogger extends Module {
             }
             pending.clear();
         } catch (IOException e) {
-            // drop them rather than retrying forever on a broken path
+
             for (String line : pending) {
                 String[] parts = line.split(" ");
                 logged.remove(BlockPos.asLong(
@@ -307,15 +286,13 @@ public class BedrockLogger extends Module {
                     logged.add(BlockPos.asLong(
                         Integer.parseInt(parts[0]), Integer.parseInt(parts[1]), Integer.parseInt(parts[2])));
                 } catch (NumberFormatException ignored) {
-                    // a hand edited line, skip it rather than dying
+
                 }
             }
         } catch (IOException ignored) {
-            // treated as an empty log, the worst case is duplicate lines which the cracker tolerates
+
         }
     }
-
-    // ==== used by .bedrock ====
 
     public static Path file() {
         return FILE;
